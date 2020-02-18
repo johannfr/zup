@@ -5,7 +5,7 @@ description = ""
 authors = ["Jóhann Friðriksson <Johann.Fridriksson@silabs.com>"]
 
 [tool.poetry.dependencies]
-python = "3.7"
+python = "^3.7"
 pyside2 = "^5.14.1"
 jira = "^2.0.0"
 appdirs = "^1.4.3"
