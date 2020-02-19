@@ -105,7 +105,11 @@ class JIRAAuthentication(QDialog):
             self.authenticated.emit()
             self.hide()
         else:
-            message = self.tr(status[1]) if len(status[1]) > 0 else self.tr("Authentication failed")
+            message = (
+                self.tr(status[1])
+                if len(status[1]) > 0
+                else self.tr("Authentication failed")
+            )
             self.status_label.setText('<font color="red">{}</font>'.format(message))
             self._inputs_enabled(True)
             self.url.setFocus()
@@ -126,7 +130,11 @@ class LogWorkDialog(QDialog):
         self.issue_selector = QComboBox(self)
 
         self.duration_selector = QComboBox()
-        duration_values = [[self.tr("4 hours"), "4h"], [self.tr("1 hour"), "1h"], [self.tr("1 day"), "1d"]]
+        duration_values = [
+            [self.tr("4 hours"), "4h"],
+            [self.tr("1 hour"), "1h"],
+            [self.tr("1 day"), "1d"],
+        ]
         for duration in duration_values:
             self.duration_selector.addItem(*duration)
         register_button = QPushButton(
@@ -270,7 +278,7 @@ class LogWorkDialog(QDialog):
                     LOG.debug("Found later worklog")
                     latest_issue = issue
                     latest_worklog = worklog
-            last_entry_text = self.tr("Last entry")+": {date}: {key}: {spent}".format(
+            last_entry_text = self.tr("Last entry") + ": {date}: {key}: {spent}".format(
                 date=pendulum.parse(latest_worklog.created).format(
                     "DD/MM/YYYY HH:MM:SS"
                 ),
