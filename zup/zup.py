@@ -224,7 +224,7 @@ class LogWorkDialog(QDialog):
                 next_run = pendulum.today().add(hours=14)
             else:
                 next_run = pendulum.today().add(hours=11)
-            Configuration.set("next_run"), next_run.for_json()
+            Configuration.set("next_run", next_run.for_json())
         else:
             LOG.debug("We were probably executed manually. Won't schedule.")
         self.close()
