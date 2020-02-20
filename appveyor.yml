@@ -1,0 +1,9 @@
+version: 1.0.{build}
+image: Visual Studio 2019
+init:
+- cmd: C:\Python38\python.exe -m pip install poetry
+build_script:
+- cmd: >-
+    C:\Python38\python -m poetry install --no-dev
+
+    C:\Python38\python -m poetry build
