@@ -6,4 +6,4 @@ build_script:
 - cmd: >-
     C:\Python38\python -m poetry install --no-dev
 
-    C:\Python38\python -m poetry build
+    C:\Python38\python -m poetry run setup.py build
