@@ -3,7 +3,7 @@ name = "zup"
 version = "0.1.0"
 description = ""
 authors = ["Jóhann Friðriksson <Johann.Fridriksson@silabs.com>"]
-include = ["icons"]
+include = ["icons/*"]
 
 [tool.poetry.dependencies]
 python = "3.8"
