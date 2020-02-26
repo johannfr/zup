@@ -26,6 +26,10 @@ from zup.authcheck import CheckHTTPBasicAuth
 LOG = logging.getLogger(__name__)
 
 
+def resolve_icon(filename):
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)), "icons", filename)
+
+
 class JIRAAuthentication(QDialog):
     """
     A GUI component that handles our connection to JIRA and does authentication if
@@ -139,12 +143,12 @@ class LogWorkDialog(QDialog):
         for duration in duration_values:
             self.duration_selector.addItem(*duration)
         register_button = QPushButton(
-            QIcon("icons/log-work.svg"), self.tr("&Register"), self
+            QIcon(resolve_icon("log-work.svg")), self.tr("&Register"), self
         )
         register_button.clicked.connect(self._register_action)
 
         snooze_button = QToolButton(self)
-        snooze_button.setIcon(QIcon("icons/snooze.svg"))
+        snooze_button.setIcon(QIcon(resolve_icon("snooze.svg")))
         snooze_button.setPopupMode(QToolButton.InstantPopup)
         snooze_menu = QMenu(self)
         snooze_menu.addAction(self.tr("15 minutes"), lambda: self._snooze(15))
@@ -304,11 +308,11 @@ class SystemTrayIcon(QSystemTrayIcon):
         self.main_menu = QMenu(parent)
         log_work_item = self.main_menu.addAction(self.tr("Log work now"))
         log_work_item.triggered.connect(self._log_work)
-        log_work_item.setIcon(QIcon("icons/log-work.svg"))
+        log_work_item.setIcon(QIcon(resolve_icon("log-work.svg")))
 
         exit_ = self.main_menu.addAction(self.tr("Exit"))
         exit_.triggered.connect(sys.exit)
-        exit_.setIcon(QIcon("icons/exit.svg"))
+        exit_.setIcon(QIcon(resolve_icon("exit.svg")))
 
         self.main_menu.addSeparator()
         self.setContextMenu(self.main_menu)
@@ -350,14 +354,16 @@ class SystemTrayIcon(QSystemTrayIcon):
                 LOG.debug("It's time to pop up the registration window")
                 self._log_work()
 
+
 def main():
     logging.basicConfig(level=logging.DEBUG, format="%(levelname)-8s %(message)s")
     app = QApplication(sys.argv)
     root_widget = QWidget()
-    tray_icon = SystemTrayIcon(QIcon("icons/zup.svg"), root_widget)
+    tray_icon = SystemTrayIcon(QIcon(resolve_icon("zup.svg")), root_widget)
     tray_icon.show()
     tray_icon.showMessage("'zup", app.tr("I'm here in case you need me."))
     sys.exit(app.exec_())
+
 
 if __name__ == "__main__":
     main()
