@@ -18,9 +18,10 @@ from requests.compat import urljoin
 
 import pendulum
 
-from constants import *
-from configuration import Configuration
-from authcheck import CheckHTTPBasicAuth
+import zup
+from zup.constants import *
+from zup.configuration import Configuration
+from zup.authcheck import CheckHTTPBasicAuth
 
 LOG = logging.getLogger(__name__)
 
@@ -349,8 +350,7 @@ class SystemTrayIcon(QSystemTrayIcon):
                 LOG.debug("It's time to pop up the registration window")
                 self._log_work()
 
-
-if __name__ == "__main__":
+def main():
     logging.basicConfig(level=logging.DEBUG, format="%(levelname)-8s %(message)s")
     app = QApplication(sys.argv)
     root_widget = QWidget()
@@ -358,3 +358,6 @@ if __name__ == "__main__":
     tray_icon.show()
     tray_icon.showMessage("'zup", app.tr("I'm here in case you need me."))
     sys.exit(app.exec_())
+
+if __name__ == "__main__":
+    main()

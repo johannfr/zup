@@ -1,4 +1,5 @@
-from constants import *
+import zup
+from zup.constants import *
 
 import os
 import json
