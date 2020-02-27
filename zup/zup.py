@@ -266,9 +266,9 @@ class LogWorkDialog(QDialog):
         latest_issue = None
         latest_worklog = None
         for issue in jira.search_issues(
-            "assignee=currentUser() and status in (Open, Ready) and type = Task order by updated",
+            "(assignee = currentUser() OR watcher = currentUser()) AND statusCategory != done ORDER BY updated DESC",
             maxResults=20,
-            fields="worklog,summary,type",
+            fields="worklog,summary,type,created",
         ):
             issue_label = "{key}: {summary} ({issuetype})".format(
                 key=issue.key,
@@ -283,13 +283,18 @@ class LogWorkDialog(QDialog):
                     LOG.debug("Found later worklog")
                     latest_issue = issue
                     latest_worklog = worklog
-            last_entry_text = self.tr("Last entry") + ": {date}: {key}: {spent}".format(
-                date=pendulum.parse(latest_worklog.created).format(
-                    "DD/MM/YYYY HH:MM:SS"
-                ),
-                key=latest_issue.key,
-                spent=latest_worklog.timeSpent,
-            )
+            try:
+                last_entry_text = self.tr(
+                    "Last entry"
+                ) + ": {date}: {key}: {spent}".format(
+                    date=pendulum.parse(latest_worklog.created).format(
+                        "DD/MM/YYYY HH:MM:SS"
+                    ),
+                    key=latest_issue.key,
+                    spent=latest_worklog.timeSpent,
+                )
+            except AttributeError:
+                last_entry_text = "No previous worklog?"
             self.last_entry_label.setText(last_entry_text)
 
         self.show()
