@@ -8,20 +8,34 @@ This tool is heavily inspired by a tool made by a former colleague of mine made,
 
 ## Installation
 
+I have Python 3.8 installed and I haven't tested against other versions.
+
 I have not yet packaged this tool nor made any effort to "freeze" it (you can call this 
-an Alpha-status of you want), so I suggest you clone this repository, fetch the
-dependencies and run it from there:
+an Alpha-status of you want), so I suggest you [pipx](https://pipxproject.github.io/pipx/)
+install it straight from this repository:
+
+If you don't have pipx installed:
+```
+pip install --user pipx
+```
+
+Then install 'Zup:
+```
+pipx install git+https://github.com/johannfr/zup.git
+```
+
+### Development
+
 ```
 git clone https://github.com/johannfr/zup.git
 cd zup
-poetry install --no-dev
+poetry install
 poetry run python zup/zup.py
 ```
 
 If you are not familiar with [Poetry](https://python-poetry.org/), this is your
 opportunity!
 
-I have Python 3.8 installed and I haven't tested against other versions.
 
 ## Usage
 
