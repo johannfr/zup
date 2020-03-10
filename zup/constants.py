@@ -1,2 +1,6 @@
 APPLICATION_NAME = "Zup"
 APPLICATION_AUTHOR = "jof"
+DEFAULT_JIRA_QUERY = "(assignee = currentUser() OR watcher = currentUser()) AND statusCategory != done ORDER BY updated DESC"
+DEFAULT_SCHEDULE_LIST = ["06:00", "11:00", "14:00"]
+DEFAULT_INTERVAL_HOURS = 0
+DEFAULT_INTERVAL_MINUTES = 15

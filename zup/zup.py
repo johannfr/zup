@@ -18,10 +18,15 @@ from requests.compat import urljoin
 
 import pendulum
 
-import zup
-from zup.constants import *
-from zup.configuration import Configuration
-from zup.authcheck import CheckHTTPBasicAuth
+try:
+    import zup
+    from zup.constants import *
+    from zup.configuration import Configuration
+    from zup.authcheck import CheckHTTPBasicAuth
+except ModuleNotFoundError:
+    from constants import *
+    from configuration import Configuration
+    from authcheck import CheckHTTPBasicAuth
 
 LOG = logging.getLogger(__name__)
 
@@ -266,7 +271,7 @@ class LogWorkDialog(QDialog):
         latest_issue = None
         latest_worklog = None
         for issue in jira.search_issues(
-            "(assignee = currentUser() OR watcher = currentUser()) AND statusCategory != done ORDER BY updated DESC",
+            Configuration.get("jira_query", DEFAULT_JIRA_QUERY),
             maxResults=20,
             fields="worklog,summary,type,created",
         ):
@@ -309,11 +314,16 @@ class SystemTrayIcon(QSystemTrayIcon):
         QSystemTrayIcon.__init__(self, icon, parent)
         self.parent = parent
         self._logwork_dialog = None
+        self._settings_dialog = None
         self.setToolTip(self.tr("Log work to JIRA"))
         self.main_menu = QMenu(parent)
         log_work_item = self.main_menu.addAction(self.tr("Log work now"))
         log_work_item.triggered.connect(self._log_work)
         log_work_item.setIcon(QIcon(resolve_icon("log-work.svg")))
+
+        settings_item = self.main_menu.addAction(self.tr("Settings"))
+        settings_item.setIcon(QIcon(resolve_icon("settings.svg")))
+        settings_item.triggered.connect(self._settings_action)
 
         exit_ = self.main_menu.addAction(self.tr("Exit"))
         exit_.triggered.connect(sys.exit)
@@ -331,6 +341,14 @@ class SystemTrayIcon(QSystemTrayIcon):
     def _activated_action(self, reason):
         if reason == self.Trigger:
             self.main_menu.popup(QCursor.pos())
+
+    def _settings_action(self):
+        LOG.debug("Open settings window")
+        if self._settings_dialog is not None:
+            self._settings_dialog.close()
+            self._settings_dialog.destroy()
+        self._settings_dialog = Configuration(self.parent)
+        self._settings_dialog.show()
 
     def _log_work(self):
         LOG.debug("Log work, yes.")
