@@ -148,7 +148,7 @@ class Configuration(QDialog):
         layout.addRow(interval_layout)
         layout.addRow(button_box)
         self.setLayout(layout)
-        if Configuration.get("schedule_type", "schedule") == "schedule":
+        if Configuration.get("schedule_type", DEFAULT_SCHEDULE_TYPE) == "schedule":
             self.schedule_radio_button.setChecked(True)
             self._schedule_radio_action()
         else:

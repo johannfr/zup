@@ -151,6 +151,10 @@ class LogWorkDialog(QDialog):
             QIcon(resolve_icon("log-work.svg")), self.tr("&Register"), self
         )
         register_button.clicked.connect(self._register_action)
+        cancel_button = QPushButton(
+            QIcon(resolve_icon("cancel.svg")), self.tr("&Cancel")
+        )
+        cancel_button.clicked.connect(self._cancel_action)
 
         snooze_button = QToolButton(self)
         snooze_button.setIcon(QIcon(resolve_icon("snooze.svg")))
@@ -165,10 +169,11 @@ class LogWorkDialog(QDialog):
         snooze_button.setMenu(snooze_menu)
 
         input_layout = QHBoxLayout()
+        input_layout.addWidget(snooze_button)
         input_layout.addWidget(self.issue_selector)
         input_layout.addWidget(self.duration_selector)
         input_layout.addWidget(register_button)
-        input_layout.addWidget(snooze_button)
+        input_layout.addWidget(cancel_button)
 
         self.last_entry_label = QLabel("")
 
@@ -186,6 +191,7 @@ class LogWorkDialog(QDialog):
         jira_auth.authenticated.connect(self._authenticated)
 
     def closeEvent(self, event):
+        LOG.debug("EventHandler: closeEvent")
         event.ignore()
         next_run = Configuration.get("next_run")
         if len(next_run) == 0 or pendulum.parse(next_run) < pendulum.now():
@@ -218,6 +224,44 @@ class LogWorkDialog(QDialog):
         Configuration.set("next_run", next_run.for_json())
         self.hide()
 
+    def _schedule_next_run(self):
+        next_run = Configuration.get("next_run")
+        if len(next_run) == 0 or pendulum.parse(next_run) < pendulum.now():
+            LOG.debug("Schedule run in the future")
+            if Configuration.get("schedule_type", DEFAULT_SCHEDULE_TYPE) == "schedule":
+                scheduled_run = None
+                for time_value in Configuration.get(
+                    "schedule_list", DEFAULT_SCHEDULE_LIST
+                ):
+                    hours, minutes = time_value.split(":")
+                    pendulum_time = pendulum.today().add(
+                        hours=int(hours), minutes=int(minutes)
+                    )
+                    if pendulum_time > pendulum.now():
+                        scheduled_run = pendulum_time
+                        break
+                if scheduled_run is None:
+                    hours, minutes = Configuration.get(
+                        "schedule_list", DEFAULT_SCHEDULE_LIST
+                    )[0].split(":")
+                    scheduled_run = pendulum.tomorrow().add(
+                        hours=int(hours), minutes=int(minutes)
+                    )
+            else:
+                interval_hours = Configuration.get(
+                    "interval_hours", DEFAULT_INTERVAL_HOURS
+                )
+                interval_minutes = Configuration.get(
+                    "interval_minutes", DEFAULT_INTERVAL_MINUTES
+                )
+                scheduled_run = pendulum.now().add(
+                    hours=interval_hours, minutes=interval_minutes
+                )
+            LOG.debug("Next run scheduled at: %s", scheduled_run)
+            Configuration.set("next_run", scheduled_run.for_json())
+        else:
+            LOG.debug("We were probably executed manually. Won't schedule.")
+
     def _register_action(self):
         self.register_issue_number = self.issue_selector.currentData()
         self.register_time_spent = self.duration_selector.currentData()
@@ -233,18 +277,11 @@ class LogWorkDialog(QDialog):
             self.parent(),
         )
         jira_auth.authenticated.connect(self._submit_registration)
-        next_run = Configuration.get("next_run")
-        if len(next_run) == 0 or pendulum.parse(next_run) < pendulum.now():
-            LOG.debug("Schedule run in the future")
-            if pendulum.now() > pendulum.today().add(hours=14):
-                next_run = pendulum.tomorrow().add(hours=11)
-            elif pendulum.now() > pendulum.today().add(hours=11):
-                next_run = pendulum.today().add(hours=14)
-            else:
-                next_run = pendulum.today().add(hours=11)
-            Configuration.set("next_run", next_run.for_json())
-        else:
-            LOG.debug("We were probably executed manually. Won't schedule.")
+        self._schedule_next_run()
+        self.close()
+
+    def _cancel_action(self):
+        self._schedule_next_run()
         self.close()
 
     def _submit_registration(self):
@@ -299,7 +336,7 @@ class LogWorkDialog(QDialog):
                     spent=latest_worklog.timeSpent,
                 )
             except AttributeError:
-                last_entry_text = "No previous worklog?"
+                last_entry_text = ""
             self.last_entry_label.setText(last_entry_text)
 
         self.show()
@@ -379,6 +416,7 @@ class SystemTrayIcon(QSystemTrayIcon):
 
 
 def main():
+    Configuration.set("next_run", "")
     logging.basicConfig(level=logging.DEBUG, format="%(levelname)-8s %(message)s")
     app = QApplication(sys.argv)
     root_widget = QWidget()
