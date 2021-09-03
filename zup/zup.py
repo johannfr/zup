@@ -9,24 +9,19 @@ import json
 from appdirs import user_config_dir
 import keyring
 
-from PySide2.QtWidgets import *
-from PySide2.QtGui import *
-from PySide2.QtCore import *
+from PySide6.QtWidgets import *
+from PySide6.QtGui import *
+from PySide6.QtCore import *
 
 from jira import JIRA
 from requests.compat import urljoin
 
 import pendulum
 
-try:
-    import zup
-    from zup.constants import *
-    from zup.configuration import Configuration
-    from zup.authcheck import CheckHTTPBasicAuth
-except ModuleNotFoundError:
-    from constants import *
-    from configuration import Configuration
-    from authcheck import CheckHTTPBasicAuth
+import zup
+from zup.constants import *
+from zup.configuration import Configuration
+from zup.authcheck import CheckHTTPBasicAuth
 
 LOG = logging.getLogger(__name__)
 
@@ -356,15 +351,15 @@ class SystemTrayIcon(QSystemTrayIcon):
         self.main_menu = QMenu(parent)
         log_work_item = self.main_menu.addAction(self.tr("Log work now"))
         log_work_item.triggered.connect(self._log_work)
-        log_work_item.setIcon(QIcon(resolve_icon("log-work.svg")))
+        # log_work_item.setIcon(QIcon(resolve_icon("log-work.svg")))
 
         settings_item = self.main_menu.addAction(self.tr("Settings"))
-        settings_item.setIcon(QIcon(resolve_icon("settings.svg")))
+        # settings_item.setIcon(QIcon(resolve_icon("settings.svg")))
         settings_item.triggered.connect(self._settings_action)
 
         exit_ = self.main_menu.addAction(self.tr("Exit"))
         exit_.triggered.connect(sys.exit)
-        exit_.setIcon(QIcon(resolve_icon("exit.svg")))
+        # exit_.setIcon(QIcon(resolve_icon("exit.svg")))
 
         self.main_menu.addSeparator()
         self.setContextMenu(self.main_menu)

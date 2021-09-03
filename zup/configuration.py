@@ -10,9 +10,9 @@ import logging
 import json
 from appdirs import user_config_dir
 
-from PySide2.QtWidgets import *
-from PySide2.QtGui import *
-from PySide2.QtCore import *
+from PySide6.QtWidgets import *
+from PySide6.QtGui import *
+from PySide6.QtCore import *
 
 
 class TimeSpinner(QSpinBox):
@@ -240,7 +240,9 @@ class Configuration(QDialog):
         json_config = Configuration._read_config()
         json_config[parameter] = value
         os.makedirs(
-            os.path.join(user_config_dir(APPLICATION_NAME, APPLICATION_AUTHOR),),
+            os.path.join(
+                user_config_dir(APPLICATION_NAME, APPLICATION_AUTHOR),
+            ),
             exist_ok=True,
         )
         json.dump(

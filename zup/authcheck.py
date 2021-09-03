@@ -1,4 +1,4 @@
-from PySide2.QtCore import *
+from PySide6.QtCore import *
 import requests
 from requests.auth import HTTPBasicAuth
 from requests.exceptions import MissingSchema
@@ -21,7 +21,8 @@ class CheckHTTPBasicAuth(QRunnable):
     def run(self):
         try:
             probe_get = requests.get(
-                self.url, auth=HTTPBasicAuth(self.username, self.password),
+                self.url,
+                auth=HTTPBasicAuth(self.username, self.password),
             )
             self.signals.finished.emit([probe_get.status_code, probe_get.reason])
         except MissingSchema:
