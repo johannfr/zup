@@ -14,7 +14,7 @@ PySide6 = "^6.0.1"
 
 [tool.poetry.dev-dependencies]
 pytest = "^5.2"
-ipython = "^7.12.0"
+ipython = "^8.10.0"
 pylint = "^2.4.4"
 
 [tool.poetry.scripts]
