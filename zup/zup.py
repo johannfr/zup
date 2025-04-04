@@ -1,27 +1,24 @@
 """
-A PySide2 (Qt5) application for registering time spent to JIRA issues.
+A PySide6 (Qt6) application for registering time spent to TargetProcess issues.
 """
-import sys
-import os
-import logging
+
 import json
+import logging
+import os
+import sys
 
-from appdirs import user_config_dir
 import keyring
-
-from PySide6.QtWidgets import *
-from PySide6.QtGui import *
+import pendulum
+from appdirs import user_config_dir
 from PySide6.QtCore import *
-
-from jira import JIRA
+from PySide6.QtGui import *
+from PySide6.QtWidgets import *
 from requests.compat import urljoin
 
-import pendulum
-
 import zup
-from zup.constants import *
-from zup.configuration import Configuration
 from zup.authcheck import CheckHTTPBasicAuth
+from zup.configuration import Configuration
+from zup.constants import *
 
 LOG = logging.getLogger(__name__)
 
@@ -30,17 +27,17 @@ def resolve_icon(filename):
     return os.path.join(os.path.dirname(os.path.abspath(__file__)), "icons", filename)
 
 
-class JIRAAuthentication(QDialog):
+class TPAuthentication(QDialog):
     """
-    A GUI component that handles our connection to JIRA and does authentication if
+    A GUI component that handles our connection to TargetProcess and does authentication if
     required.
     """
 
     authenticated = Signal()
 
     def __init__(self, url, username, password, parent=None):
-        super(JIRAAuthentication, self).__init__(parent)
-        self.setWindowTitle(self.tr("JIRA Authentication"))
+        super(TPAuthentication, self).__init__(parent)
+        self.setWindowTitle(self.tr("TargetProcess Authentication"))
         self.threadpool = QThreadPool()
         self.jira = None
 
@@ -177,7 +174,7 @@ class LogWorkDialog(QDialog):
         base_layout.addWidget(self.last_entry_label)
         self.setLayout(base_layout)
 
-        jira_auth = JIRAAuthentication(
+        jira_auth = TPAuthentication(
             Configuration.get("server_url"),
             Configuration.get("username"),
             keyring.get_password(APPLICATION_NAME, Configuration.get("username")),
@@ -265,7 +262,7 @@ class LogWorkDialog(QDialog):
             self.register_issue_number,
             self.register_time_spent,
         )
-        jira_auth = JIRAAuthentication(
+        jira_auth = TPAuthentication(
             Configuration.get("server_url"),
             Configuration.get("username"),
             keyring.get_password(APPLICATION_NAME, Configuration.get("username")),
@@ -280,59 +277,60 @@ class LogWorkDialog(QDialog):
         self.close()
 
     def _submit_registration(self):
-        jira = JIRA(
-            Configuration.get("server_url"),
-            auth=(
-                Configuration.get("username"),
-                keyring.get_password(APPLICATION_NAME, Configuration.get("username")),
-            ),
-        )
-        jira.add_worklog(
-            jira.issue(self.register_issue_number), self.register_time_spent
-        )
+        pass
+        # jira = JIRA(
+        #     Configuration.get("server_url"),
+        #     auth=(
+        #         Configuration.get("username"),
+        #         keyring.get_password(APPLICATION_NAME, Configuration.get("username")),
+        #     ),
+        # )
+        # jira.add_worklog(
+        #     jira.issue(self.register_issue_number), self.register_time_spent
+        # )
 
     def _authenticated(self):
         LOG.debug("LogWork: We are authenticated.")
-        jira = JIRA(
-            Configuration.get("server_url"),
-            auth=(
-                Configuration.get("username"),
-                keyring.get_password(APPLICATION_NAME, Configuration.get("username")),
-            ),
-        )
-        latest_issue = None
-        latest_worklog = None
-        for issue in jira.search_issues(
-            Configuration.get("jira_query", DEFAULT_JIRA_QUERY),
-            maxResults=20,
-            fields="worklog,summary,type,created",
-        ):
-            issue_label = "{key}: {summary} ({issuetype})".format(
-                key=issue.key,
-                summary=issue.fields.summary,
-                issuetype=issue.fields.issuetype,
-            )
-            self.issue_selector.addItem(issue_label, issue.id)
-            for worklog in issue.fields.worklog.worklogs:
-                if latest_worklog is None or pendulum.parse(
-                    worklog.created
-                ) > pendulum.parse(latest_worklog.created):
-                    LOG.debug("Found later worklog")
-                    latest_issue = issue
-                    latest_worklog = worklog
-            try:
-                last_entry_text = self.tr(
-                    "Last entry"
-                ) + ": {date}: {key}: {spent}".format(
-                    date=pendulum.parse(latest_worklog.created).format(
-                        "DD/MM/YYYY HH:MM:SS"
-                    ),
-                    key=latest_issue.key,
-                    spent=latest_worklog.timeSpent,
-                )
-            except AttributeError:
-                last_entry_text = ""
-            self.last_entry_label.setText(last_entry_text)
+        # jira = JIRA(
+        #     Configuration.get("server_url"),
+        #     auth=(
+        #         Configuration.get("username"),
+        #         keyring.get_password(APPLICATION_NAME, Configuration.get("username")),
+        #     ),
+        # )
+        # latest_issue = None
+        # latest_worklog = None
+        # for issue in jira.search_issues(
+        #     Configuration.get("jira_query", DEFAULT_JIRA_QUERY),
+        #     maxResults=20,
+        #     fields="worklog,summary,type,created",
+        # ):
+        #     issue_label = "{key}: {summary} ({issuetype})".format(
+        #         key=issue.key,
+        #         summary=issue.fields.summary,
+        #         issuetype=issue.fields.issuetype,
+        #     )
+        #     self.issue_selector.addItem(issue_label, issue.id)
+        #     for worklog in issue.fields.worklog.worklogs:
+        #         if latest_worklog is None or pendulum.parse(
+        #             worklog.created
+        #         ) > pendulum.parse(latest_worklog.created):
+        #             LOG.debug("Found later worklog")
+        #             latest_issue = issue
+        #             latest_worklog = worklog
+        #     try:
+        #         last_entry_text = self.tr(
+        #             "Last entry"
+        #         ) + ": {date}: {key}: {spent}".format(
+        #             date=pendulum.parse(latest_worklog.created).format(
+        #                 "DD/MM/YYYY HH:MM:SS"
+        #             ),
+        #             key=latest_issue.key,
+        #             spent=latest_worklog.timeSpent,
+        #         )
+        #     except AttributeError:
+        #         last_entry_text = ""
+        #     self.last_entry_label.setText(last_entry_text)
 
         self.show()
 
@@ -347,7 +345,7 @@ class SystemTrayIcon(QSystemTrayIcon):
         self.parent = parent
         self._logwork_dialog = None
         self._settings_dialog = None
-        self.setToolTip(self.tr("Log work to JIRA"))
+        self.setToolTip(self.tr("Log work to TargetProcess"))
         self.main_menu = QMenu(parent)
         log_work_item = self.main_menu.addAction(self.tr("Log work now"))
         log_work_item.triggered.connect(self._log_work)

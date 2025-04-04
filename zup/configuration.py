@@ -4,15 +4,15 @@ try:
 except ModuleNotFoundError:
     from constants import *
 
+import json
+import logging
 import os
 import sys
-import logging
-import json
-from appdirs import user_config_dir
 
-from PySide6.QtWidgets import *
-from PySide6.QtGui import *
+from appdirs import user_config_dir
 from PySide6.QtCore import *
+from PySide6.QtGui import *
+from PySide6.QtWidgets import *
 
 
 class TimeSpinner(QSpinBox):
