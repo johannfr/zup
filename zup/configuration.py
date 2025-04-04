@@ -1,18 +1,35 @@
-try:
-    import zup
-    from zup.constants import *
-except ModuleNotFoundError:
-    from constants import *
-
 import json
 import logging
 import os
 import sys
 
 from appdirs import user_config_dir
-from PySide6.QtCore import *
-from PySide6.QtGui import *
-from PySide6.QtWidgets import *
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import (
+    QApplication,
+    QButtonGroup,
+    QDialog,
+    QDialogButtonBox,
+    QFormLayout,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QListWidget,
+    QPushButton,
+    QRadioButton,
+    QSpinBox,
+    QVBoxLayout,
+)
+
+from zup.constants import (
+    APPLICATION_AUTHOR,
+    APPLICATION_NAME,
+    DEFAULT_INTERVAL_HOURS,
+    DEFAULT_INTERVAL_MINUTES,
+    DEFAULT_JIRA_QUERY,
+    DEFAULT_SCHEDULE_LIST,
+    DEFAULT_SCHEDULE_TYPE,
+)
 
 
 class TimeSpinner(QSpinBox):

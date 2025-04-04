@@ -1,8 +1,8 @@
-from PySide6.QtCore import *
 import requests
+from PySide6.QtCore import QObject, QRunnable, Signal, Slot
 from requests.auth import HTTPBasicAuth
-from requests.exceptions import MissingSchema
 from requests.exceptions import ConnectionError as RConnectionError
+from requests.exceptions import MissingSchema
 
 
 class CheckAuthSignals(QObject):

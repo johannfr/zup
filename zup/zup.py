@@ -2,120 +2,46 @@
 A PySide6 (Qt6) application for registering time spent to TargetProcess issues.
 """
 
-import json
 import logging
 import os
 import sys
 
-import keyring
 import pendulum
-from appdirs import user_config_dir
-from PySide6.QtCore import *
-from PySide6.QtGui import *
-from PySide6.QtWidgets import *
+from PySide6.QtCore import QEvent, Qt, QThreadPool, QTimer, Signal
+from PySide6.QtGui import QCursor, QIcon
+from PySide6.QtWidgets import (
+    QApplication,
+    QComboBox,
+    QDialog,
+    QDialogButtonBox,
+    QFormLayout,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QMenu,
+    QPushButton,
+    QSystemTrayIcon,
+    QToolButton,
+    QVBoxLayout,
+    QWidget,
+)
 from requests.compat import urljoin
 
-import zup
 from zup.authcheck import CheckHTTPBasicAuth
 from zup.configuration import Configuration
-from zup.constants import *
+from zup.constants import (
+    APPLICATION_NAME,
+    DEFAULT_INTERVAL_HOURS,
+    DEFAULT_INTERVAL_MINUTES,
+    DEFAULT_SCHEDULE_LIST,
+    DEFAULT_SCHEDULE_TYPE,
+)
 
 LOG = logging.getLogger(__name__)
 
 
 def resolve_icon(filename):
     return os.path.join(os.path.dirname(os.path.abspath(__file__)), "icons", filename)
-
-
-class TPAuthentication(QDialog):
-    """
-    A GUI component that handles our connection to TargetProcess and does authentication if
-    required.
-    """
-
-    authenticated = Signal()
-
-    def __init__(self, url, username, password, parent=None):
-        super(TPAuthentication, self).__init__(parent)
-        self.setWindowTitle(self.tr("TargetProcess Authentication"))
-        self.threadpool = QThreadPool()
-        self.jira = None
-
-        self.url = QLineEdit(url)
-        self.username = QLineEdit(username)
-        self.password = QLineEdit(password)
-        self.password.setEchoMode(QLineEdit.Password)
-        self.setMinimumWidth(300)
-
-        self.status_label = QLabel("")
-
-        self.button_box = QDialogButtonBox(
-            QDialogButtonBox.Ok | QDialogButtonBox.Cancel
-        )
-        self.button_box.accepted.connect(self._ok_action)
-        self.button_box.rejected.connect(self._cancel_action)
-
-        layout = QFormLayout()
-        layout.addRow(self.tr("U&RL"), self.url)
-        layout.addRow(self.tr("&Username"), self.username)
-        layout.addRow(self.tr("&Password"), self.password)
-        layout.addRow(self.status_label)
-        layout.addRow(self.button_box)
-        self.setLayout(layout)
-        self.url.setFocus()
-        self._check_authentication(url, username, password)
-
-    def _check_authentication(self, url, username, password):
-        LOG.debug(
-            "Opening a connection to: %s (username=%s, password=%s)",
-            url,
-            username,
-            "*" * len(password) if password is not None else 0,
-        )
-        self._inputs_enabled(False)
-        basic_checker = CheckHTTPBasicAuth(
-            url=urljoin(url, "/rest/api/2/serverInfo"),
-            username=username,
-            password=password,
-        )
-        basic_checker.signals.finished.connect(self._authcheck_finished)
-        self.threadpool.start(basic_checker)
-
-    def _inputs_enabled(self, state):
-        for widget in [self.url, self.username, self.password, self.button_box]:
-            widget.setEnabled(state)
-
-    def _ok_action(self):
-        self._inputs_enabled(False)
-        self._check_authentication(
-            self.url.text(), self.username.text(), self.password.text()
-        )
-
-    def _cancel_action(self):
-        LOG.debug("Cancel.")
-        self.close()
-        sys.exit(1)
-
-    def _authcheck_finished(self, status):
-        LOG.debug("Authentication check finished: %d: %s", status[0], status[1])
-        if status[0] == 200:
-            Configuration.set("server_url", self.url.text())
-            Configuration.set("username", self.username.text())
-            keyring.set_password(
-                APPLICATION_NAME, self.username.text(), self.password.text()
-            )
-            self.authenticated.emit()
-            self.hide()
-        else:
-            message = (
-                self.tr(status[1])
-                if len(status[1]) > 0
-                else self.tr("Authentication failed")
-            )
-            self.status_label.setText('<font color="red">{}</font>'.format(message))
-            self._inputs_enabled(True)
-            self.url.setFocus()
-            self.show()
 
 
 class LogWorkDialog(QDialog):
@@ -140,16 +66,16 @@ class LogWorkDialog(QDialog):
         for duration in duration_values:
             self.duration_selector.addItem(*duration)
         register_button = QPushButton(
-            QIcon(resolve_icon("log-work.svg")), self.tr("&Register"), self
+            QIcon(resolve_icon("log-work.png")), self.tr("&Register"), self
         )
         register_button.clicked.connect(self._register_action)
         cancel_button = QPushButton(
-            QIcon(resolve_icon("cancel.svg")), self.tr("&Cancel")
+            QIcon(resolve_icon("cancel.png")), self.tr("&Cancel")
         )
         cancel_button.clicked.connect(self._cancel_action)
 
         snooze_button = QToolButton(self)
-        snooze_button.setIcon(QIcon(resolve_icon("snooze.svg")))
+        snooze_button.setIcon(QIcon(resolve_icon("snooze.png")))
         snooze_button.setPopupMode(QToolButton.InstantPopup)
         snooze_menu = QMenu(self)
         snooze_menu.addAction(self.tr("15 minutes"), lambda: self._snooze(15))
@@ -173,14 +99,7 @@ class LogWorkDialog(QDialog):
         base_layout.addLayout(input_layout)
         base_layout.addWidget(self.last_entry_label)
         self.setLayout(base_layout)
-
-        jira_auth = TPAuthentication(
-            Configuration.get("server_url"),
-            Configuration.get("username"),
-            keyring.get_password(APPLICATION_NAME, Configuration.get("username")),
-            parent,
-        )
-        jira_auth.authenticated.connect(self._authenticated)
+        self.show()
 
     def closeEvent(self, event):
         LOG.debug("EventHandler: closeEvent")
@@ -262,13 +181,6 @@ class LogWorkDialog(QDialog):
             self.register_issue_number,
             self.register_time_spent,
         )
-        jira_auth = TPAuthentication(
-            Configuration.get("server_url"),
-            Configuration.get("username"),
-            keyring.get_password(APPLICATION_NAME, Configuration.get("username")),
-            self.parent(),
-        )
-        jira_auth.authenticated.connect(self._submit_registration)
         self._schedule_next_run()
         self.close()
 
@@ -349,15 +261,15 @@ class SystemTrayIcon(QSystemTrayIcon):
         self.main_menu = QMenu(parent)
         log_work_item = self.main_menu.addAction(self.tr("Log work now"))
         log_work_item.triggered.connect(self._log_work)
-        # log_work_item.setIcon(QIcon(resolve_icon("log-work.svg")))
+        log_work_item.setIcon(QIcon(resolve_icon("log-work.png")))
 
         settings_item = self.main_menu.addAction(self.tr("Settings"))
-        # settings_item.setIcon(QIcon(resolve_icon("settings.svg")))
+        settings_item.setIcon(QIcon(resolve_icon("settings.png")))
         settings_item.triggered.connect(self._settings_action)
 
         exit_ = self.main_menu.addAction(self.tr("Exit"))
         exit_.triggered.connect(sys.exit)
-        # exit_.setIcon(QIcon(resolve_icon("exit.svg")))
+        exit_.setIcon(QIcon(resolve_icon("exit.png")))
 
         self.main_menu.addSeparator()
         self.setContextMenu(self.main_menu)
@@ -369,8 +281,9 @@ class SystemTrayIcon(QSystemTrayIcon):
         self._timer_tick()
 
     def _activated_action(self, reason):
-        if reason == self.Trigger:
-            self.main_menu.popup(QCursor.pos())
+        LOG.debug(reason)
+        # if reason == self.ActivationReason.Trigger:
+        #     self.main_menu.popup(QCursor.pos())
 
     def _settings_action(self):
         LOG.debug("Open settings window")
@@ -413,10 +326,10 @@ def main():
     logging.basicConfig(level=logging.DEBUG, format="%(levelname)-8s %(message)s")
     app = QApplication(sys.argv)
     root_widget = QWidget()
-    tray_icon = SystemTrayIcon(QIcon(resolve_icon("zup.svg")), root_widget)
+    tray_icon = SystemTrayIcon(QIcon(resolve_icon("zup.png")), root_widget)
     tray_icon.show()
     tray_icon.showMessage("'zup", app.tr("I'm here in case you need me."))
-    sys.exit(app.exec_())
+    sys.exit(app.exec())
 
 
 if __name__ == "__main__":
