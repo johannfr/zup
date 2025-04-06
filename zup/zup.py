@@ -2,22 +2,22 @@
 A PySide6 (Qt6) application for registering time spent to TargetProcess issues.
 """
 
+import json
 import logging
 import os
 import sys
+import time
 
 import pendulum
-from PySide6.QtCore import QEvent, Qt, QThreadPool, QTimer, Signal
-from PySide6.QtGui import QCursor, QIcon
+import requests
+from PySide6.QtCore import QEvent, QRunnable, Qt, QThreadPool, QTimer
+from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
     QDialog,
-    QDialogButtonBox,
-    QFormLayout,
     QHBoxLayout,
     QLabel,
-    QLineEdit,
     QMenu,
     QPushButton,
     QSystemTrayIcon,
@@ -27,14 +27,13 @@ from PySide6.QtWidgets import (
 )
 from requests.compat import urljoin
 
-from zup.authcheck import CheckHTTPBasicAuth
 from zup.configuration import Configuration
 from zup.constants import (
-    APPLICATION_NAME,
     DEFAULT_INTERVAL_HOURS,
     DEFAULT_INTERVAL_MINUTES,
     DEFAULT_SCHEDULE_LIST,
     DEFAULT_SCHEDULE_TYPE,
+    DEFAULT_TP_URL,
 )
 
 LOG = logging.getLogger(__name__)
@@ -42,6 +41,17 @@ LOG = logging.getLogger(__name__)
 
 def resolve_icon(filename):
     return os.path.join(os.path.dirname(os.path.abspath(__file__)), "icons", filename)
+
+
+class RegistrationThreadRunner(QRunnable):
+    """Submit the time-registration in a separate thread."""
+
+    def __init__(self, originator):
+        super().__init__()
+        self.originator = originator
+
+    def run(self):
+        self.originator.submit_registration()
 
 
 class LogWorkDialog(QDialog):
@@ -54,14 +64,19 @@ class LogWorkDialog(QDialog):
         self.setWindowTitle(self.tr("Log Work"))
         self.installEventFilter(self)
         self.alive = True
+        self.submit_thread_pool = QThreadPool()
 
         self.issue_selector = QComboBox(self)
+        for issue in self._retrieve_relevant_issues():
+            self.issue_selector.addItem(
+                f"TP{issue['Id']}: {issue['Name']}", int(issue["Id"])
+            )
 
         self.duration_selector = QComboBox()
         duration_values = [
-            [self.tr("4 hours"), "4h"],
-            [self.tr("1 hour"), "1h"],
-            [self.tr("1 day"), "1d"],
+            [self.tr("4 hours"), 4],
+            [self.tr("1 hour"), 1],
+            [self.tr("1 day"), 8],
         ]
         for duration in duration_values:
             self.duration_selector.addItem(*duration)
@@ -93,13 +108,25 @@ class LogWorkDialog(QDialog):
         input_layout.addWidget(register_button)
         input_layout.addWidget(cancel_button)
 
-        self.last_entry_label = QLabel("")
+        last_entry_text = (
+            f"Last registration: TP{Configuration.get('last_registration_issue_number', 0)}: {Configuration.get('last_registration_time_spent', 0)} hours"
+            if Configuration.get("last_registration_issue_number", 0) != 0
+            else ""
+        )
+        self.last_entry_label = QLabel(last_entry_text)
 
         base_layout = QVBoxLayout()
         base_layout.addLayout(input_layout)
         base_layout.addWidget(self.last_entry_label)
         self.setLayout(base_layout)
         self.show()
+
+        # Center the dialog on the screen
+        screen = QApplication.primaryScreen()
+        dialog_geometry = self.frameGeometry()
+        center_point = screen.geometry().center()
+        dialog_geometry.moveCenter(center_point)
+        self.move(dialog_geometry.topLeft())
 
     def closeEvent(self, event):
         LOG.debug("EventHandler: closeEvent")
@@ -120,6 +147,27 @@ class LogWorkDialog(QDialog):
             return True
         else:
             return super(LogWorkDialog, self).eventFilter(widget, event)
+
+    def _retrieve_relevant_issues(self):
+        get_params = {
+            "access_token": Configuration.get("tp_access_token", ""),
+            "orderByDesc": "StartDate",
+            "format": "json",
+            "take": Configuration.get("tp_take", 20),
+            "where": f"(Team.Name eq '{Configuration.get('tp_team_name', '')}')"
+            "and(Assignable.EntityType.Name eq 'UserStory')"
+            "and(EntityState.Name in ('Test','Done'))",
+        }
+        api_request = requests.get(
+            urljoin(
+                Configuration.get("tp_url", DEFAULT_TP_URL), "/api/v1/TeamAssignments"
+            ),
+            params=get_params,
+        )
+        if api_request.status_code == 200:
+            return [x["Assignable"] for x in json.loads(api_request.text)["Items"]]
+        else:
+            return []
 
     def _snooze(self, duration):
         if duration > 0:
@@ -174,8 +222,12 @@ class LogWorkDialog(QDialog):
             LOG.debug("We were probably executed manually. Won't schedule.")
 
     def _register_action(self):
+        task = RegistrationThreadRunner(self)
+        self.submit_thread_pool.start(task)
         self.register_issue_number = self.issue_selector.currentData()
         self.register_time_spent = self.duration_selector.currentData()
+        Configuration.set("last_registration_issue_number", self.register_issue_number)
+        Configuration.set("last_registration_time_spent", self.register_time_spent)
         LOG.debug(
             "Register work. Yes: %s: %s",
             self.register_issue_number,
@@ -188,63 +240,28 @@ class LogWorkDialog(QDialog):
         self._schedule_next_run()
         self.close()
 
-    def _submit_registration(self):
-        pass
-        # jira = JIRA(
-        #     Configuration.get("server_url"),
-        #     auth=(
-        #         Configuration.get("username"),
-        #         keyring.get_password(APPLICATION_NAME, Configuration.get("username")),
-        #     ),
-        # )
-        # jira.add_worklog(
-        #     jira.issue(self.register_issue_number), self.register_time_spent
-        # )
+    def submit_registration(self):
+        LOG.debug(
+            "Submit a registration: %s: %d hours",
+            self.register_issue_number,
+            self.register_time_spent,
+        )
+        json_payload = {
+            "User": {"Id": Configuration.get("tp_userid", "")},
+            "Spent": self.register_time_spent,
+            "Description": ".",
+            "Assignable": {"Id": self.register_issue_number},
+        }
 
-    def _authenticated(self):
-        LOG.debug("LogWork: We are authenticated.")
-        # jira = JIRA(
-        #     Configuration.get("server_url"),
-        #     auth=(
-        #         Configuration.get("username"),
-        #         keyring.get_password(APPLICATION_NAME, Configuration.get("username")),
-        #     ),
-        # )
-        # latest_issue = None
-        # latest_worklog = None
-        # for issue in jira.search_issues(
-        #     Configuration.get("jira_query", DEFAULT_JIRA_QUERY),
-        #     maxResults=20,
-        #     fields="worklog,summary,type,created",
-        # ):
-        #     issue_label = "{key}: {summary} ({issuetype})".format(
-        #         key=issue.key,
-        #         summary=issue.fields.summary,
-        #         issuetype=issue.fields.issuetype,
-        #     )
-        #     self.issue_selector.addItem(issue_label, issue.id)
-        #     for worklog in issue.fields.worklog.worklogs:
-        #         if latest_worklog is None or pendulum.parse(
-        #             worklog.created
-        #         ) > pendulum.parse(latest_worklog.created):
-        #             LOG.debug("Found later worklog")
-        #             latest_issue = issue
-        #             latest_worklog = worklog
-        #     try:
-        #         last_entry_text = self.tr(
-        #             "Last entry"
-        #         ) + ": {date}: {key}: {spent}".format(
-        #             date=pendulum.parse(latest_worklog.created).format(
-        #                 "DD/MM/YYYY HH:MM:SS"
-        #             ),
-        #             key=latest_issue.key,
-        #             spent=latest_worklog.timeSpent,
-        #         )
-        #     except AttributeError:
-        #         last_entry_text = ""
-        #     self.last_entry_label.setText(last_entry_text)
+        params = {"access_token": Configuration.get("tp_access_token", "")}
 
-        self.show()
+        requests.post(
+            urljoin(Configuration.get("tp_url", ""), "/api/v1/times"),
+            params=params,
+            json=json_payload,
+        )
+
+        LOG.debug("Done Submitting.")
 
 
 class SystemTrayIcon(QSystemTrayIcon):

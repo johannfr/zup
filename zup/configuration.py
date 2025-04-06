@@ -4,7 +4,7 @@ import os
 import sys
 
 from appdirs import user_config_dir
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QMutex, QMutexLocker, Qt
 from PySide6.QtWidgets import (
     QApplication,
     QButtonGroup,
@@ -26,9 +26,10 @@ from zup.constants import (
     APPLICATION_NAME,
     DEFAULT_INTERVAL_HOURS,
     DEFAULT_INTERVAL_MINUTES,
-    DEFAULT_JIRA_QUERY,
     DEFAULT_SCHEDULE_LIST,
     DEFAULT_SCHEDULE_TYPE,
+    DEFAULT_TP_TEAM_NAME,
+    DEFAULT_TP_URL,
 )
 
 
@@ -49,6 +50,8 @@ class Configuration(QDialog):
     Class for managing the application configuration.
     """
 
+    configuration_lock = QMutex()
+
     def __init__(self, parent=None):
         super(Configuration, self).__init__(parent)
 
@@ -62,7 +65,12 @@ class Configuration(QDialog):
         self.setWindowTitle(self.tr("Configuration"))
         self.setMinimumWidth(400)
 
-        self.jql = QLineEdit(Configuration.get("jira_query", DEFAULT_JIRA_QUERY))
+        self.tp_url = QLineEdit(Configuration.get("tp_url", DEFAULT_TP_URL))
+        self.tp_userid = QLineEdit(Configuration.get("tp_userid", ""))
+        self.tp_access_token = QLineEdit(Configuration.get("tp_access_token", ""))
+        self.tp_team_name = QLineEdit(
+            Configuration.get("tp_team_name", DEFAULT_TP_TEAM_NAME)
+        )
 
         self.schedule_type_group = QButtonGroup()
 
@@ -158,7 +166,10 @@ class Configuration(QDialog):
         button_box.rejected.connect(self._cancel_action)
 
         layout = QFormLayout()
-        layout.addRow(self.tr("JIRA &query"), self.jql)
+        layout.addRow(self.tr("TP &URL"), self.tp_url)
+        layout.addRow(self.tr("TP User&Id"), self.tp_userid)
+        layout.addRow(self.tr("TP &Access-token"), self.tp_access_token)
+        layout.addRow(self.tr("TP &Team name"), self.tp_team_name)
         layout.addRow(self.schedule_radio_button)
         layout.addRow(schedule_layout)
         layout.addRow(self.interval_radio_button)
@@ -173,7 +184,10 @@ class Configuration(QDialog):
             self._interval_radio_action()
 
     def _save_action(self):
-        Configuration.set("jira_query", self.jql.text())
+        Configuration.set("tp_url", self.tp_url.text())
+        Configuration.set("tp_userid", self.tp_userid.text())
+        Configuration.set("tp_access_token", self.tp_access_token.text())
+        Configuration.set("tp_team_name", self.tp_team_name.text())
         schedule_items = [
             item.text() for item in self.schedule_list.findItems("*", Qt.MatchWildcard)
         ]
@@ -243,34 +257,37 @@ class Configuration(QDialog):
         """
         Reads the specified configuration parameter from file (every time)
         """
-        try:
-            json_config = Configuration._read_config()
-            return json_config[parameter]
-        except KeyError:
-            return default_value
+        with QMutexLocker(Configuration.configuration_lock):
+            try:
+                json_config = Configuration._read_config()
+                return json_config[parameter]
+            except KeyError:
+                return default_value
 
     @staticmethod
     def set(parameter, value):
         """
         Sets the value of the specified configuration parameter and writes it to disk
         """
-        json_config = Configuration._read_config()
-        json_config[parameter] = value
-        os.makedirs(
-            os.path.join(
-                user_config_dir(APPLICATION_NAME, APPLICATION_AUTHOR),
-            ),
-            exist_ok=True,
-        )
-        json.dump(
-            json_config,
-            open(
+        with QMutexLocker(Configuration.configuration_lock):
+            json_config = Configuration._read_config()
+            json_config[parameter] = value
+            os.makedirs(
                 os.path.join(
-                    user_config_dir(APPLICATION_NAME, APPLICATION_AUTHOR), "config.json"
+                    user_config_dir(APPLICATION_NAME, APPLICATION_AUTHOR),
                 ),
-                "w",
-            ),
-        )
+                exist_ok=True,
+            )
+            json.dump(
+                json_config,
+                open(
+                    os.path.join(
+                        user_config_dir(APPLICATION_NAME, APPLICATION_AUTHOR),
+                        "config.json",
+                    ),
+                    "w",
+                ),
+            )
 
 
 def main():
@@ -278,7 +295,7 @@ def main():
     app = QApplication(sys.argv)
     configuration_window = Configuration()
     configuration_window.show()
-    sys.exit(app.exec_())
+    sys.exit(app.exec())
 
 
 if __name__ == "__main__":

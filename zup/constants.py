@@ -1,6 +1,7 @@
 APPLICATION_NAME = "Zup"
 APPLICATION_AUTHOR = "jof"
-DEFAULT_JIRA_QUERY = "(assignee = currentUser() OR watcher = currentUser()) AND statusCategory != done ORDER BY updated DESC"
+DEFAULT_TP_URL = "https://tern.tpondemand.com/"
+DEFAULT_TP_TEAM_NAME = "Aces"
 DEFAULT_SCHEDULE_TYPE = "schedule"
 DEFAULT_SCHEDULE_LIST = ["06:00", "11:00", "14:00"]
 DEFAULT_INTERVAL_HOURS = 0
