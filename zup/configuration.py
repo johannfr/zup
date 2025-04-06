@@ -28,6 +28,7 @@ from zup.constants import (
     DEFAULT_INTERVAL_MINUTES,
     DEFAULT_SCHEDULE_LIST,
     DEFAULT_SCHEDULE_TYPE,
+    DEFAULT_TP_TAKE,
     DEFAULT_TP_TEAM_NAME,
     DEFAULT_TP_URL,
 )
@@ -65,12 +66,15 @@ class Configuration(QDialog):
         self.setWindowTitle(self.tr("Configuration"))
         self.setMinimumWidth(400)
 
+        tp_userid = Configuration.get("tp_userid", -1)
+        tp_take = Configuration.get("tp_take", DEFAULT_TP_TAKE)
         self.tp_url = QLineEdit(Configuration.get("tp_url", DEFAULT_TP_URL))
-        self.tp_userid = QLineEdit(Configuration.get("tp_userid", ""))
+        self.tp_userid = QLineEdit(str(tp_userid) if tp_userid >= 0 else "")
         self.tp_access_token = QLineEdit(Configuration.get("tp_access_token", ""))
         self.tp_team_name = QLineEdit(
             Configuration.get("tp_team_name", DEFAULT_TP_TEAM_NAME)
         )
+        self.tp_take = QLineEdit(str(tp_take))
 
         self.schedule_type_group = QButtonGroup()
 
@@ -170,6 +174,7 @@ class Configuration(QDialog):
         layout.addRow(self.tr("TP User&Id"), self.tp_userid)
         layout.addRow(self.tr("TP &Access-token"), self.tp_access_token)
         layout.addRow(self.tr("TP &Team name"), self.tp_team_name)
+        layout.addRow(self.tr("TP &No. results"), self.tp_take)
         layout.addRow(self.schedule_radio_button)
         layout.addRow(schedule_layout)
         layout.addRow(self.interval_radio_button)
@@ -185,9 +190,10 @@ class Configuration(QDialog):
 
     def _save_action(self):
         Configuration.set("tp_url", self.tp_url.text())
-        Configuration.set("tp_userid", self.tp_userid.text())
+        Configuration.set("tp_userid", int(self.tp_userid.text()))
         Configuration.set("tp_access_token", self.tp_access_token.text())
         Configuration.set("tp_team_name", self.tp_team_name.text())
+        Configuration.set("tp_take", int(self.tp_take.text()))
         schedule_items = [
             item.text() for item in self.schedule_list.findItems("*", Qt.MatchWildcard)
         ]

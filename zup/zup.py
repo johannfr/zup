@@ -6,7 +6,6 @@ import json
 import logging
 import os
 import sys
-import time
 
 import pendulum
 import requests
@@ -33,6 +32,7 @@ from zup.constants import (
     DEFAULT_INTERVAL_MINUTES,
     DEFAULT_SCHEDULE_LIST,
     DEFAULT_SCHEDULE_TYPE,
+    DEFAULT_TP_TAKE,
     DEFAULT_TP_URL,
 )
 
@@ -41,17 +41,6 @@ LOG = logging.getLogger(__name__)
 
 def resolve_icon(filename):
     return os.path.join(os.path.dirname(os.path.abspath(__file__)), "icons", filename)
-
-
-class RegistrationThreadRunner(QRunnable):
-    """Submit the time-registration in a separate thread."""
-
-    def __init__(self, originator):
-        super().__init__()
-        self.originator = originator
-
-    def run(self):
-        self.originator.submit_registration()
 
 
 class LogWorkDialog(QDialog):
@@ -108,12 +97,21 @@ class LogWorkDialog(QDialog):
         input_layout.addWidget(register_button)
         input_layout.addWidget(cancel_button)
 
-        last_entry_text = (
-            f"Last registration: TP{Configuration.get('last_registration_issue_number', 0)}: {Configuration.get('last_registration_time_spent', 0)} hours"
-            if Configuration.get("last_registration_issue_number", 0) != 0
-            else ""
+        self.last_entry_label = QLabel("")
+        last_registration_issue_number = Configuration.get(
+            "last_registration_issue_number", -1
         )
-        self.last_entry_label = QLabel(last_entry_text)
+        if last_registration_issue_number != -1:
+            last_entry_text = (
+                "Last entry: "
+                f"{Configuration.get('last_registration_datetime', '')}: "
+                f"TP{last_registration_issue_number}: "
+                f"{Configuration.get('last_registration_time_spent', 0)} hours"
+            )
+            self.last_entry_label.setText(last_entry_text)
+            last_index = self.issue_selector.findData(last_registration_issue_number)
+            if last_index >= 0:
+                self.issue_selector.setCurrentIndex(last_index)
 
         base_layout = QVBoxLayout()
         base_layout.addLayout(input_layout)
@@ -151,12 +149,12 @@ class LogWorkDialog(QDialog):
     def _retrieve_relevant_issues(self):
         get_params = {
             "access_token": Configuration.get("tp_access_token", ""),
-            "orderByDesc": "StartDate",
+            "orderByDesc": "Assignable.Id",
             "format": "json",
-            "take": Configuration.get("tp_take", 20),
+            "take": Configuration.get("tp_take", DEFAULT_TP_TAKE),
             "where": f"(Team.Name eq '{Configuration.get('tp_team_name', '')}')"
             "and(Assignable.EntityType.Name eq 'UserStory')"
-            "and(EntityState.Name in ('Test','Done'))",
+            "and(EntityState.Name ne 'Done')",
         }
         api_request = requests.get(
             urljoin(
@@ -222,17 +220,12 @@ class LogWorkDialog(QDialog):
             LOG.debug("We were probably executed manually. Won't schedule.")
 
     def _register_action(self):
-        task = RegistrationThreadRunner(self)
-        self.submit_thread_pool.start(task)
         self.register_issue_number = self.issue_selector.currentData()
         self.register_time_spent = self.duration_selector.currentData()
+        self.submit_thread_pool.start(QRunnable.create(self.submit_registration))
         Configuration.set("last_registration_issue_number", self.register_issue_number)
         Configuration.set("last_registration_time_spent", self.register_time_spent)
-        LOG.debug(
-            "Register work. Yes: %s: %s",
-            self.register_issue_number,
-            self.register_time_spent,
-        )
+        Configuration.set("last_registration_datetime", str(pendulum.now()))
         self._schedule_next_run()
         self.close()
 
@@ -291,6 +284,9 @@ class SystemTrayIcon(QSystemTrayIcon):
         self.main_menu.addSeparator()
         self.setContextMenu(self.main_menu)
         self.activated.connect(self._activated_action)
+
+        # Set up a wake-timer that checks every minute if it is time to show a
+        # LogWorkDialog.
         self.wake_timer = QTimer(self.parent)
         self.wake_timer.setTimerType(Qt.VeryCoarseTimer)
         self.wake_timer.timeout.connect(self._timer_tick)
@@ -311,7 +307,7 @@ class SystemTrayIcon(QSystemTrayIcon):
         self._settings_dialog.show()
 
     def _log_work(self):
-        LOG.debug("Log work, yes.")
+        LOG.debug("Open LogWorkDialog.")
 
         if self._logwork_dialog is not None:
             self._logwork_dialog.close()
