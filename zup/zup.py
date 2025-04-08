@@ -140,8 +140,10 @@ class LogWorkDialog(QDialog):
         event.ignore()
         next_run = Configuration.get("next_run")
         if len(next_run) == 0 or pendulum.parse(next_run) < pendulum.now():
+            LOG.debug("Snoozing due to closeEvent")
             self._snooze(15)
         else:
+            LOG.debug("Just closing.")
             self.hide()
 
     def eventFilter(self, widget, event):
@@ -345,7 +347,10 @@ class SystemTrayIcon(QSystemTrayIcon):
 
 def main():
     Configuration.set("next_run", "")
-    logging.basicConfig(level=logging.DEBUG, format="%(levelname)-8s %(message)s")
+    logging.basicConfig(
+        level=logging.DEBUG,
+        format="%(levelname)-8s %(funcName)s:%(filename)s:%(lineno)d %(message)s",
+    )
     app = QApplication(sys.argv)
     root_widget = QWidget()
     tray_icon = SystemTrayIcon(QIcon(resolve_icon("zup.png")), root_widget)
