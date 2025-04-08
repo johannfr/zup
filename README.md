@@ -6,9 +6,6 @@ you to register work-time into the your "Open" or "Test" TargetProcess UserStori
 This tool is heavily inspired by a tool made by a former colleague of mine made, 
 Árni Þór Erlendsson, called [Task Reminder](http://www.sneddy.com/taskreminder/).
 
-This tool was integrated with JIRA in a previous life, and that's where the (now outdated)
-screenshots come from.
-
 ## Usage
 
 First open up the settings dialog from the system-tray menu and enter the appropriate
