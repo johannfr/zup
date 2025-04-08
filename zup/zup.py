@@ -14,6 +14,7 @@ from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
+    QCompleter,
     QDialog,
     QHBoxLayout,
     QLabel,
@@ -56,10 +57,17 @@ class LogWorkDialog(QDialog):
         self.submit_thread_pool = QThreadPool()
 
         self.issue_selector = QComboBox(self)
+        self.issue_selector.setEditable(True)
+        relevant_issues = []
         for issue in self._retrieve_relevant_issues():
-            self.issue_selector.addItem(
-                f"TP{issue['Id']}: {issue['Name']}", int(issue["Id"])
-            )
+            issue_display_string = f"TP{issue['Id']}: {issue['Name']}"
+            relevant_issues.append(issue_display_string)
+            self.issue_selector.addItem(issue_display_string, int(issue["Id"]))
+
+        completer = QCompleter(relevant_issues)
+        completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
+        completer.setFilterMode(Qt.MatchFlag.MatchContains)
+        self.issue_selector.setCompleter(completer)
 
         self.duration_selector = QComboBox()
         duration_values = [
@@ -117,6 +125,7 @@ class LogWorkDialog(QDialog):
         base_layout.addLayout(input_layout)
         base_layout.addWidget(self.last_entry_label)
         self.setLayout(base_layout)
+        self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint)
         self.show()
 
         # Center the dialog on the screen
