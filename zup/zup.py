@@ -36,6 +36,22 @@ from zup.constants import (
     DEFAULT_TP_TAKE,
     DEFAULT_TP_URL,
 )
+from zup.logging import RedactingFormatter
+
+redact_patterns = [
+    (r"access_token=\w+", "access_token=****"),
+]
+
+log_handler = logging.StreamHandler()
+log_formatter = RedactingFormatter(
+    fmt="%(levelname)-8s %(filename)s:%(lineno)d %(funcName)s %(message)s",
+    redact_patterns=redact_patterns,
+)
+log_handler.setFormatter(log_formatter)
+
+root_logger = logging.getLogger()
+root_logger.setLevel(logging.DEBUG)
+root_logger.addHandler(log_handler)
 
 LOG = logging.getLogger(__name__)
 
@@ -347,10 +363,7 @@ class SystemTrayIcon(QSystemTrayIcon):
 
 def main():
     Configuration.set("next_run", "")
-    logging.basicConfig(
-        level=logging.DEBUG,
-        format="%(levelname)-8s %(funcName)s:%(filename)s:%(lineno)d %(message)s",
-    )
+
     app = QApplication(sys.argv)
     root_widget = QWidget()
     tray_icon = SystemTrayIcon(QIcon(resolve_icon("zup.png")), root_widget)
