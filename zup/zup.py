@@ -70,6 +70,7 @@ class LogWorkDialog(QDialog):
         self.setWindowTitle(self.tr("Log Work"))
         self.installEventFilter(self)
         self.alive = True
+        self.internal_close_flag = False
         self.submit_thread_pool = QThreadPool()
 
         self.issue_selector = QComboBox(self)
@@ -151,9 +152,18 @@ class LogWorkDialog(QDialog):
         dialog_geometry.moveCenter(center_point)
         self.move(dialog_geometry.topLeft())
 
+    def internal_close(self):
+        self.internal_close_flag = True
+        self.close()
+        self.internal_close_flag = False
+
     def closeEvent(self, event):
         LOG.debug("EventHandler: closeEvent")
         event.ignore()
+        if self.internal_close_flag:
+            LOG.debug("EventHandler: closeEvent: Internal close. Not doing anything.")
+            self.hide()
+            return
         next_run = Configuration.get("next_run")
         if len(next_run) == 0 or pendulum.parse(next_run) < pendulum.now():
             LOG.debug("Snoozing due to closeEvent")
@@ -254,11 +264,11 @@ class LogWorkDialog(QDialog):
         Configuration.set("last_registration_time_spent", self.register_time_spent)
         Configuration.set("last_registration_datetime", str(pendulum.now()))
         self._schedule_next_run()
-        self.close()
+        self.internal_close()
 
     def _cancel_action(self):
         self._schedule_next_run()
-        self.close()
+        self.internal_close()
 
     def submit_registration(self):
         LOG.debug(
@@ -337,7 +347,7 @@ class SystemTrayIcon(QSystemTrayIcon):
         LOG.debug("Open LogWorkDialog.")
 
         if self._logwork_dialog is not None:
-            self._logwork_dialog.close()
+            self._logwork_dialog.internal_close()
             self._logwork_dialog.destroy()
         self._logwork_dialog = LogWorkDialog(self.parent)
 
