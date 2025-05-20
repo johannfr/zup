@@ -9,7 +9,7 @@ import sys
 
 import pendulum
 import requests
-from PySide6.QtCore import QEvent, QRunnable, Qt, QThreadPool, QTimer
+from PySide6.QtCore import QEvent, QRunnable, Qt, QThreadPool, QTimer, Slot
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
     QApplication,
@@ -122,25 +122,44 @@ class LogWorkDialog(QDialog):
         input_layout.addWidget(register_button)
         input_layout.addWidget(cancel_button)
 
-        self.last_entry_label = QLabel("")
+        self.toggle_history_button = QToolButton()
+        self.toggle_history_button.setText("Registration history")
+        self.toggle_history_button.setToolButtonStyle(
+            Qt.ToolButtonStyle.ToolButtonTextBesideIcon
+        )
+        self.toggle_history_button.setArrowType(Qt.ArrowType.RightArrow)
+        self.toggle_history_button.setCheckable(True)
+        self.toggle_history_button.setChecked(False)
+        self.toggle_history_button.setStyleSheet("QToolButton { border: none; }")
+        self.toggle_history_button.toggled.connect(self.toggle_log_content)
+
+        self.log_widget = QWidget()
+        self.log_layout = QVBoxLayout(self.log_widget)
+        for item in reversed(Configuration.get("registration_history", [])):
+            item_datetime = pendulum.parse(item["datetime"]).format(
+                "YYYY-MM-DD HH:MM:ss"
+            )
+            self.log_layout.addWidget(
+                QLabel(
+                    f"{item_datetime}: {item['issue_title']}: {item['time_spent']} hours"
+                )
+            )
+        self.log_layout.addStretch(1)
+        self.log_widget.setVisible(False)
+
         last_registration_issue_number = Configuration.get(
             "last_registration_issue_number", -1
         )
         if last_registration_issue_number != -1:
-            last_entry_text = (
-                "Last entry: "
-                f"{Configuration.get('last_registration_datetime', '')}: "
-                f"TP{last_registration_issue_number}: "
-                f"{Configuration.get('last_registration_time_spent', 0)} hours"
-            )
-            self.last_entry_label.setText(last_entry_text)
             last_index = self.issue_selector.findData(last_registration_issue_number)
             if last_index >= 0:
                 self.issue_selector.setCurrentIndex(last_index)
 
         base_layout = QVBoxLayout()
         base_layout.addLayout(input_layout)
-        base_layout.addWidget(self.last_entry_label)
+        base_layout.addWidget(self.toggle_history_button)
+        base_layout.addWidget(self.log_widget)
+        base_layout.addStretch(1)
         self.setLayout(base_layout)
         self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint)
         self.show()
@@ -151,6 +170,18 @@ class LogWorkDialog(QDialog):
         center_point = screen.geometry().center()
         dialog_geometry.moveCenter(center_point)
         self.move(dialog_geometry.topLeft())
+
+    @Slot(bool)
+    def toggle_log_content(self, checked):
+        if checked:
+            self.toggle_history_button.setArrowType(Qt.ArrowType.DownArrow)
+            self.toggle_history_button.setText("")
+            self.log_widget.setVisible(True)
+        else:
+            self.toggle_history_button.setArrowType(Qt.ArrowType.RightArrow)
+            self.toggle_history_button.setText("Registration history")
+            self.log_widget.setVisible(False)
+            QTimer.singleShot(1, self.adjustSize)
 
     def internal_close(self):
         self.internal_close_flag = True
@@ -258,11 +289,22 @@ class LogWorkDialog(QDialog):
 
     def _register_action(self):
         self.register_issue_number = self.issue_selector.currentData()
+        self.register_issue_title = self.issue_selector.currentText()
         self.register_time_spent = self.duration_selector.currentData()
         self.submit_thread_pool.start(QRunnable.create(self.submit_registration))
+        registration_history = Configuration.get("registration_history", [])
+        registration_history.append(
+            {
+                "datetime": str(pendulum.now()),
+                "issue_number": self.register_issue_number,
+                "issue_title": self.register_issue_title,
+                "time_spent": self.register_time_spent,
+            }
+        )
+        registration_history = registration_history[-5:]
+        Configuration.set("registration_history", registration_history)
+
         Configuration.set("last_registration_issue_number", self.register_issue_number)
-        Configuration.set("last_registration_time_spent", self.register_time_spent)
-        Configuration.set("last_registration_datetime", str(pendulum.now()))
         self._schedule_next_run()
         self.internal_close()
 
