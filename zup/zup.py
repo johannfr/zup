@@ -221,7 +221,10 @@ class LogWorkDialog(QDialog):
             "format": "json",
             "take": Configuration.get("tp_take", DEFAULT_TP_TAKE),
             "where": f"(Team.Name eq '{Configuration.get('tp_team_name', '')}')"
-            "and(Assignable.EntityType.Name eq 'UserStory')"
+            "and("
+            "Assignable.EntityType.Name eq 'Request')"
+            "or(Assignable.EntityType.Name eq 'UserStory')"
+            ")"
             "and(EntityState.Name ne 'Done')",
         }
         api_request = requests.get(
