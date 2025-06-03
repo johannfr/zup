@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QListWidget,
+    QPlainTextEdit,
     QPushButton,
     QRadioButton,
     QSpinBox,
@@ -31,6 +32,7 @@ from zup.constants import (
     DEFAULT_TP_TAKE,
     DEFAULT_TP_TEAM_NAME,
     DEFAULT_TP_URL,
+    DEFAULT_TP_WHERE,
 )
 
 
@@ -75,6 +77,7 @@ class Configuration(QDialog):
             Configuration.get("tp_team_name", DEFAULT_TP_TEAM_NAME)
         )
         self.tp_take = QLineEdit(str(tp_take))
+        self.tp_where = QPlainTextEdit(Configuration.get("tp_where", DEFAULT_TP_WHERE))
 
         self.schedule_type_group = QButtonGroup()
 
@@ -175,6 +178,8 @@ class Configuration(QDialog):
         layout.addRow(self.tr("TP &Access-token"), self.tp_access_token)
         layout.addRow(self.tr("TP &Team name"), self.tp_team_name)
         layout.addRow(self.tr("TP &No. results"), self.tp_take)
+        layout.addRow(self.tr("TP &Where"), self.tp_where)
+        layout.addRow(self.tr("Placeholders"), QLabel("{user_id}, {team_name}"))
         layout.addRow(self.schedule_radio_button)
         layout.addRow(schedule_layout)
         layout.addRow(self.interval_radio_button)
@@ -194,6 +199,7 @@ class Configuration(QDialog):
         Configuration.set("tp_access_token", self.tp_access_token.text())
         Configuration.set("tp_team_name", self.tp_team_name.text())
         Configuration.set("tp_take", int(self.tp_take.text()))
+        Configuration.set("tp_where", self.tp_where.toPlainText())
         schedule_items = [
             item.text() for item in self.schedule_list.findItems("*", Qt.MatchWildcard)
         ]

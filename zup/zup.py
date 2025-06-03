@@ -34,7 +34,9 @@ from zup.constants import (
     DEFAULT_SCHEDULE_LIST,
     DEFAULT_SCHEDULE_TYPE,
     DEFAULT_TP_TAKE,
+    DEFAULT_TP_TEAM_NAME,
     DEFAULT_TP_URL,
+    DEFAULT_TP_WHERE,
 )
 from zup.logging import RedactingFormatter
 
@@ -215,17 +217,18 @@ class LogWorkDialog(QDialog):
             return super(LogWorkDialog, self).eventFilter(widget, event)
 
     def _retrieve_relevant_issues(self):
+        where_items = {
+            "team_name": Configuration.get("tp_team_name", DEFAULT_TP_TEAM_NAME),
+            "user_id": Configuration.get("tp_userid", ""),
+        }
         get_params = {
             "access_token": Configuration.get("tp_access_token", ""),
             "orderByDesc": "Assignable.Id",
             "format": "json",
             "take": Configuration.get("tp_take", DEFAULT_TP_TAKE),
-            "where": f"(Team.Name eq '{Configuration.get('tp_team_name', '')}')"
-            "and("
-            "Assignable.EntityType.Name eq 'Request')"
-            "or(Assignable.EntityType.Name eq 'UserStory')"
-            ")"
-            "and(EntityState.Name ne 'Done')",
+            "where": Configuration.get("tp_where", DEFAULT_TP_WHERE).format(
+                **where_items
+            ),
         }
         api_request = requests.get(
             urljoin(
