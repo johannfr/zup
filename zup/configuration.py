@@ -78,6 +78,8 @@ class Configuration(QDialog):
         )
         self.tp_take = QLineEdit(str(tp_take))
         self.tp_where = QPlainTextEdit(Configuration.get("tp_where", DEFAULT_TP_WHERE))
+        self.tp_where_reset_button = QPushButton(self.tr("Reset Where to default"))
+        self.tp_where_reset_button.clicked.connect(self._reset_where_action)
 
         self.schedule_type_group = QButtonGroup()
 
@@ -180,6 +182,7 @@ class Configuration(QDialog):
         layout.addRow(self.tr("TP &No. results"), self.tp_take)
         layout.addRow(self.tr("TP &Where"), self.tp_where)
         layout.addRow(self.tr("Placeholders"), QLabel("{user_id}, {team_name}"))
+        layout.addRow("", self.tp_where_reset_button)
         layout.addRow(self.schedule_radio_button)
         layout.addRow(schedule_layout)
         layout.addRow(self.interval_radio_button)
@@ -192,6 +195,9 @@ class Configuration(QDialog):
         else:
             self.interval_radio_button.setChecked(True)
             self._interval_radio_action()
+
+    def _reset_where_action(self):
+        self.tp_where.setPlainText(DEFAULT_TP_WHERE)
 
     def _save_action(self):
         Configuration.set("tp_url", self.tp_url.text())
