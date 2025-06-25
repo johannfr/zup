@@ -49,8 +49,9 @@ class Configuration(QDialog):
     Class for managing the application configuration.
     """
 
-    def __init__(self, parent=None):
+    def __init__(self, config_store: ConfigStore, parent=None):
         super(Configuration, self).__init__(parent)
+        self.config_store = config_store
 
         self.schedule_widgets = []
         self.interval_widgets = []
@@ -71,7 +72,9 @@ class Configuration(QDialog):
             self.config_store.get("tp_team_name", DEFAULT_TP_TEAM_NAME)
         )
         self.tp_take = QLineEdit(str(tp_take))
-        self.tp_where = QPlainTextEdit(self.config_store.get("tp_where", DEFAULT_TP_WHERE))
+        self.tp_where = QPlainTextEdit(
+            self.config_store.get("tp_where", DEFAULT_TP_WHERE)
+        )
         self.tp_where_reset_button = QPushButton(self.tr("Reset Where to default"))
         self.tp_where_reset_button.clicked.connect(self._reset_where_action)
 
@@ -113,9 +116,7 @@ class Configuration(QDialog):
         self.schedule_list = managed_widget(self.schedule_widgets, QListWidget())
         self.schedule_list.setMaximumWidth(360)
         self.schedule_list.setSortingEnabled(True)
-        for time_value in self.config_store.get(
-            "schedule_list", DEFAULT_SCHEDULE_LIST
-        ):
+        for time_value in self.config_store.get("schedule_list", DEFAULT_SCHEDULE_LIST):
             self.schedule_list.addItem(time_value)
         self.schedule_list.itemSelectionChanged.connect(self._schedule_item_action)
         schedule_list_layout = QHBoxLayout()
@@ -176,6 +177,9 @@ class Configuration(QDialog):
         layout.addRow(self.tr("TP &Access-token"), self.tp_access_token)
         layout.addRow(self.tr("TP &Team name"), self.tp_team_name)
         layout.addRow(self.tr("TP &No. results"), self.tp_take)
+        layout.addRow(self.tr("TP &Where"), self.tp_where)
+        layout.addRow(self.tr("Placeholders"), QLabel("{user_id}, {team_name}"))
+        layout.addRow("", self.tp_where_reset_button)
         layout.addRow(self.schedule_radio_button)
         layout.addRow(schedule_layout)
         layout.addRow(self.interval_radio_button)
@@ -188,6 +192,9 @@ class Configuration(QDialog):
         else:
             self.interval_radio_button.setChecked(True)
             self._interval_radio_action()
+
+    def _reset_where_action(self):
+        self.tp_where.setPlainText(DEFAULT_TP_WHERE)
 
     def _save_action(self):
         self.config_store.set("tp_url", self.tp_url.text())
@@ -245,11 +252,11 @@ class Configuration(QDialog):
 def main():
     logging.basicConfig(level=logging.DEBUG, format="%(levelname)-8s %(message)s")
     app = QApplication(sys.argv)
-    configuration_window = Configuration()
+    config_store = ConfigStore()
+    configuration_window = Configuration(config_store)
     configuration_window.show()
     sys.exit(app.exec())
 
 
 if __name__ == "__main__":
     main()
-

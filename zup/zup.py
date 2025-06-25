@@ -5,10 +5,10 @@ A PySide6 (Qt6) application for registering time spent to TargetProcess issues.
 import logging
 import os
 import sys
-from typing import Optional
+from typing import Any, Callable, Optional
 
 import pendulum
-from PySide6.QtCore import QEvent, QRunnable, Qt, QThreadPool, QTimer
+from PySide6.QtCore import QEvent, QRunnable, Qt, QThreadPool, QTimer, Slot
 from PySide6.QtGui import QCloseEvent, QIcon
 from PySide6.QtWidgets import (
     QApplication,
@@ -42,17 +42,38 @@ def resolve_icon(filename: str) -> str:
     return os.path.join(os.path.dirname(os.path.abspath(__file__)), "icons", filename)
 
 
+class Worker(QRunnable):
+    """
+    A generic worker thread that can run any function with arguments.
+    """
+
+    def __init__(self, fn: Callable, *args: Any, **kwargs: Any) -> None:
+        super().__init__()
+        self.fn = fn
+        self.args = args
+        self.kwargs = kwargs
+
+    @Slot()
+    def run(self) -> None:
+        """
+        Execute the worker's function.
+        """
+        self.fn(*self.args, **self.kwargs)
+
+
 class LogWorkDialog(QDialog):
     """
     This is the main log-work dialog of this application.
     """
 
-    def __init__(self, config_store: ConfigStore, parent: Optional[QWidget] = None) -> None:
+    def __init__(
+        self, config_store: ConfigStore, parent: Optional[QWidget] = None
+    ) -> None:
         QDialog.__init__(self, parent)
         self.config_store = config_store
         self.setWindowTitle(self.tr("Log Work"))
         self.installEventFilter(self)
-        self.alive = True
+        self.internal_close_flag = False
         self.submit_thread_pool = QThreadPool()
         self.tp_client = TargetProcessClient(self.config_store)
 
@@ -121,7 +142,7 @@ class LogWorkDialog(QDialog):
 
         self.log_widget = QWidget()
         self.log_layout = QVBoxLayout(self.log_widget)
-        for item in reversed(Configuration.get("registration_history", [])):
+        for item in reversed(self.config_store.get("registration_history", [])):
             item_datetime = pendulum.parse(item["datetime"]).format(
                 "YYYY-MM-DD HH:MM:ss"
             )
@@ -218,7 +239,10 @@ class LogWorkDialog(QDialog):
         next_run = self.config_store.get("next_run")
         if len(next_run) == 0 or pendulum.parse(next_run) < pendulum.now():
             LOG.debug("Schedule run in the future")
-            if self.config_store.get("schedule_type", DEFAULT_SCHEDULE_TYPE) == "schedule":
+            if (
+                self.config_store.get("schedule_type", DEFAULT_SCHEDULE_TYPE)
+                == "schedule"
+            ):
                 scheduled_run = None
                 for time_value in self.config_store.get(
                     "schedule_list", DEFAULT_SCHEDULE_LIST
@@ -241,27 +265,37 @@ class LogWorkDialog(QDialog):
                 interval_hours = self.config_store.get(
                     "interval_hours", DEFAULT_INTERVAL_HOURS
                 )
-                interval_minutes = Configuration.get(
+                interval_minutes = self.config_store.get(
                     "interval_minutes", DEFAULT_INTERVAL_MINUTES
                 )
                 scheduled_run = pendulum.now().add(
                     hours=interval_hours, minutes=interval_minutes
                 )
             LOG.debug("Next run scheduled at: %s", scheduled_run)
-            Configuration.set("next_run", scheduled_run.for_json())
+            self.config_store.set("next_run", scheduled_run.for_json())
         else:
             LOG.debug("We were probably executed manually. Won't schedule.")
 
     def _register_action(self) -> None:
         issue_number = self.issue_selector.currentData()
+        issue_title = self.issue_selector.currentText()
         time_spent = self.duration_selector.currentData()
 
         self.submit_thread_pool.start(
-            QRunnable.create(
-                self.tp_client.submit_time_registration, issue_number, time_spent
-            )
+            Worker(self.tp_client.submit_time_registration, issue_number, time_spent)
         )
 
+        registration_history = self.config_store.get("registration_history", [])
+        registration_history.append(
+            {
+                "datetime": str(pendulum.now()),
+                "issue_number": issue_number,
+                "issue_title": issue_title,
+                "time_spent": time_spent,
+            }
+        )
+        registration_history = registration_history[-5:]
+        self.config_store.set("registration_history", registration_history)
         self.config_store.set("last_registration_issue_number", issue_number)
         self.config_store.set("last_registration_time_spent", time_spent)
         self.config_store.set("last_registration_datetime", str(pendulum.now()))
@@ -320,7 +354,7 @@ class SystemTrayIcon(QSystemTrayIcon):
         if self._settings_dialog is not None:
             self._settings_dialog.close()
             self._settings_dialog.destroy()
-        self._settings_dialog = Configuration(self.parent)
+        self._settings_dialog = Configuration(self.config_store, self.parent)
         self._settings_dialog.show()
 
     def _log_work(self) -> None:
@@ -368,4 +402,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
