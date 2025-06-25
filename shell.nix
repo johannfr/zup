@@ -12,8 +12,4 @@ pkgs.mkShell {
     pkgs.stdenv.cc.cc.lib
     pkgs.libz
   ];
-
-  shellHook = ''
-    alias vim='uv run ~/mitt/nixvim/result/bin/nvim'
-  '';
 }
