@@ -1,10 +1,7 @@
-import json
 import logging
-import os
 import sys
 
-from appdirs import user_config_dir
-from PySide6.QtCore import QMutex, QMutexLocker, Qt
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QApplication,
     QButtonGroup,
@@ -22,9 +19,8 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
+from zup.config_store import ConfigStore
 from zup.constants import (
-    APPLICATION_AUTHOR,
-    APPLICATION_NAME,
     DEFAULT_INTERVAL_HOURS,
     DEFAULT_INTERVAL_MINUTES,
     DEFAULT_SCHEDULE_LIST,
@@ -53,8 +49,6 @@ class Configuration(QDialog):
     Class for managing the application configuration.
     """
 
-    configuration_lock = QMutex()
-
     def __init__(self, parent=None):
         super(Configuration, self).__init__(parent)
 
@@ -68,16 +62,16 @@ class Configuration(QDialog):
         self.setWindowTitle(self.tr("Configuration"))
         self.setMinimumWidth(400)
 
-        tp_userid = Configuration.get("tp_userid", -1)
-        tp_take = Configuration.get("tp_take", DEFAULT_TP_TAKE)
-        self.tp_url = QLineEdit(Configuration.get("tp_url", DEFAULT_TP_URL))
+        tp_userid = self.config_store.get("tp_userid", -1)
+        tp_take = self.config_store.get("tp_take", DEFAULT_TP_TAKE)
+        self.tp_url = QLineEdit(self.config_store.get("tp_url", DEFAULT_TP_URL))
         self.tp_userid = QLineEdit(str(tp_userid) if tp_userid >= 0 else "")
-        self.tp_access_token = QLineEdit(Configuration.get("tp_access_token", ""))
+        self.tp_access_token = QLineEdit(self.config_store.get("tp_access_token", ""))
         self.tp_team_name = QLineEdit(
-            Configuration.get("tp_team_name", DEFAULT_TP_TEAM_NAME)
+            self.config_store.get("tp_team_name", DEFAULT_TP_TEAM_NAME)
         )
         self.tp_take = QLineEdit(str(tp_take))
-        self.tp_where = QPlainTextEdit(Configuration.get("tp_where", DEFAULT_TP_WHERE))
+        self.tp_where = QPlainTextEdit(self.config_store.get("tp_where", DEFAULT_TP_WHERE))
         self.tp_where_reset_button = QPushButton(self.tr("Reset Where to default"))
         self.tp_where_reset_button.clicked.connect(self._reset_where_action)
 
@@ -119,7 +113,9 @@ class Configuration(QDialog):
         self.schedule_list = managed_widget(self.schedule_widgets, QListWidget())
         self.schedule_list.setMaximumWidth(360)
         self.schedule_list.setSortingEnabled(True)
-        for time_value in Configuration.get("schedule_list", DEFAULT_SCHEDULE_LIST):
+        for time_value in self.config_store.get(
+            "schedule_list", DEFAULT_SCHEDULE_LIST
+        ):
             self.schedule_list.addItem(time_value)
         self.schedule_list.itemSelectionChanged.connect(self._schedule_item_action)
         schedule_list_layout = QHBoxLayout()
@@ -153,7 +149,7 @@ class Configuration(QDialog):
         self.interval_time_hour.setRange(0, 23)
         self.interval_time_hour.setWrapping(True)
         self.interval_time_hour.setValue(
-            Configuration.get("interval_hours", DEFAULT_INTERVAL_HOURS)
+            self.config_store.get("interval_hours", DEFAULT_INTERVAL_HOURS)
         )
         interval_time_layout.addWidget(self.interval_time_hour)
         interval_time_layout.addWidget(
@@ -164,7 +160,7 @@ class Configuration(QDialog):
         self.interval_time_minute.setRange(0, 59)
         self.interval_time_minute.setWrapping(True)
         self.interval_time_minute.setValue(
-            Configuration.get("interval_minutes", DEFAULT_INTERVAL_MINUTES)
+            self.config_store.get("interval_minutes", DEFAULT_INTERVAL_MINUTES)
         )
         interval_time_layout.addWidget(self.interval_time_minute)
         interval_time_layout.setSpacing(0)
@@ -180,42 +176,35 @@ class Configuration(QDialog):
         layout.addRow(self.tr("TP &Access-token"), self.tp_access_token)
         layout.addRow(self.tr("TP &Team name"), self.tp_team_name)
         layout.addRow(self.tr("TP &No. results"), self.tp_take)
-        layout.addRow(self.tr("TP &Where"), self.tp_where)
-        layout.addRow(self.tr("Placeholders"), QLabel("{user_id}, {team_name}"))
-        layout.addRow("", self.tp_where_reset_button)
         layout.addRow(self.schedule_radio_button)
         layout.addRow(schedule_layout)
         layout.addRow(self.interval_radio_button)
         layout.addRow(interval_layout)
         layout.addRow(button_box)
         self.setLayout(layout)
-        if Configuration.get("schedule_type", DEFAULT_SCHEDULE_TYPE) == "schedule":
+        if self.config_store.get("schedule_type", DEFAULT_SCHEDULE_TYPE) == "schedule":
             self.schedule_radio_button.setChecked(True)
             self._schedule_radio_action()
         else:
             self.interval_radio_button.setChecked(True)
             self._interval_radio_action()
 
-    def _reset_where_action(self):
-        self.tp_where.setPlainText(DEFAULT_TP_WHERE)
-
     def _save_action(self):
-        Configuration.set("tp_url", self.tp_url.text())
-        Configuration.set("tp_userid", int(self.tp_userid.text()))
-        Configuration.set("tp_access_token", self.tp_access_token.text())
-        Configuration.set("tp_team_name", self.tp_team_name.text())
-        Configuration.set("tp_take", int(self.tp_take.text()))
-        Configuration.set("tp_where", self.tp_where.toPlainText())
+        self.config_store.set("tp_url", self.tp_url.text())
+        self.config_store.set("tp_userid", int(self.tp_userid.text()))
+        self.config_store.set("tp_access_token", self.tp_access_token.text())
+        self.config_store.set("tp_team_name", self.tp_team_name.text())
+        self.config_store.set("tp_take", int(self.tp_take.text()))
         schedule_items = [
             item.text() for item in self.schedule_list.findItems("*", Qt.MatchWildcard)
         ]
-        Configuration.set("schedule_list", schedule_items)
-        Configuration.set(
+        self.config_store.set("schedule_list", schedule_items)
+        self.config_store.set(
             "schedule_type",
             "schedule" if self.schedule_radio_button.isChecked() else "interval",
         )
-        Configuration.set("interval_minutes", self.interval_time_minute.value())
-        Configuration.set("interval_hours", self.interval_time_hour.value())
+        self.config_store.set("interval_minutes", self.interval_time_minute.value())
+        self.config_store.set("interval_hours", self.interval_time_hour.value())
         self.hide()
 
     def _cancel_action(self):
@@ -252,61 +241,6 @@ class Configuration(QDialog):
     def _schedule_item_action(self):
         self.remove_time_button.setEnabled(self.schedule_list.count() > 0)
 
-    @staticmethod
-    def _read_config():
-        """
-        Wraps reading the configuration JSON-file
-        """
-        try:
-            return json.load(
-                open(
-                    os.path.join(
-                        user_config_dir(APPLICATION_NAME, APPLICATION_AUTHOR),
-                        "config.json",
-                    ),
-                    "r",
-                )
-            )
-        except (FileNotFoundError, SyntaxError):
-            return {}
-
-    @staticmethod
-    def get(parameter, default_value=""):
-        """
-        Reads the specified configuration parameter from file (every time)
-        """
-        with QMutexLocker(Configuration.configuration_lock):
-            try:
-                json_config = Configuration._read_config()
-                return json_config[parameter]
-            except KeyError:
-                return default_value
-
-    @staticmethod
-    def set(parameter, value):
-        """
-        Sets the value of the specified configuration parameter and writes it to disk
-        """
-        with QMutexLocker(Configuration.configuration_lock):
-            json_config = Configuration._read_config()
-            json_config[parameter] = value
-            os.makedirs(
-                os.path.join(
-                    user_config_dir(APPLICATION_NAME, APPLICATION_AUTHOR),
-                ),
-                exist_ok=True,
-            )
-            json.dump(
-                json_config,
-                open(
-                    os.path.join(
-                        user_config_dir(APPLICATION_NAME, APPLICATION_AUTHOR),
-                        "config.json",
-                    ),
-                    "w",
-                ),
-            )
-
 
 def main():
     logging.basicConfig(level=logging.DEBUG, format="%(levelname)-8s %(message)s")
@@ -318,3 +252,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

@@ -2,15 +2,14 @@
 A PySide6 (Qt6) application for registering time spent to TargetProcess issues.
 """
 
-import json
 import logging
 import os
 import sys
+from typing import Optional
 
 import pendulum
-import requests
-from PySide6.QtCore import QEvent, QRunnable, Qt, QThreadPool, QTimer, Slot
-from PySide6.QtGui import QIcon
+from PySide6.QtCore import QEvent, QRunnable, Qt, QThreadPool, QTimer
+from PySide6.QtGui import QCloseEvent, QIcon
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
@@ -25,40 +24,21 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
-from requests.compat import urljoin
 
+from zup.config_store import ConfigStore
 from zup.configuration import Configuration
 from zup.constants import (
     DEFAULT_INTERVAL_HOURS,
     DEFAULT_INTERVAL_MINUTES,
     DEFAULT_SCHEDULE_LIST,
     DEFAULT_SCHEDULE_TYPE,
-    DEFAULT_TP_TAKE,
-    DEFAULT_TP_TEAM_NAME,
-    DEFAULT_TP_URL,
-    DEFAULT_TP_WHERE,
 )
-from zup.logging import RedactingFormatter
-
-redact_patterns = [
-    (r"access_token=\w+", "access_token=****"),
-]
-
-log_handler = logging.StreamHandler()
-log_formatter = RedactingFormatter(
-    fmt="%(levelname)-8s %(filename)s:%(lineno)d %(funcName)s %(message)s",
-    redact_patterns=redact_patterns,
-)
-log_handler.setFormatter(log_formatter)
-
-root_logger = logging.getLogger()
-root_logger.setLevel(logging.DEBUG)
-root_logger.addHandler(log_handler)
+from zup.targetprocess_client import TargetProcessClient
 
 LOG = logging.getLogger(__name__)
 
 
-def resolve_icon(filename):
+def resolve_icon(filename: str) -> str:
     return os.path.join(os.path.dirname(os.path.abspath(__file__)), "icons", filename)
 
 
@@ -67,18 +47,19 @@ class LogWorkDialog(QDialog):
     This is the main log-work dialog of this application.
     """
 
-    def __init__(self, parent=None):
+    def __init__(self, config_store: ConfigStore, parent: Optional[QWidget] = None) -> None:
         QDialog.__init__(self, parent)
+        self.config_store = config_store
         self.setWindowTitle(self.tr("Log Work"))
         self.installEventFilter(self)
         self.alive = True
-        self.internal_close_flag = False
         self.submit_thread_pool = QThreadPool()
+        self.tp_client = TargetProcessClient(self.config_store)
 
         self.issue_selector = QComboBox(self)
         self.issue_selector.setEditable(True)
         relevant_issues = []
-        for issue in self._retrieve_relevant_issues():
+        for issue in self.tp_client.get_relevant_issues():
             issue_display_string = f"TP{issue['Id']}: {issue['Name']}"
             relevant_issues.append(issue_display_string)
             self.issue_selector.addItem(issue_display_string, int(issue["Id"]))
@@ -87,6 +68,9 @@ class LogWorkDialog(QDialog):
         completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
         completer.setFilterMode(Qt.MatchFlag.MatchContains)
         self.issue_selector.setCompleter(completer)
+
+        popup = completer.popup()
+        popup.setWindowFlags(Qt.WindowType.ToolTip)
 
         self.duration_selector = QComboBox()
         duration_values = [
@@ -107,7 +91,7 @@ class LogWorkDialog(QDialog):
 
         snooze_button = QToolButton(self)
         snooze_button.setIcon(QIcon(resolve_icon("snooze.png")))
-        snooze_button.setPopupMode(QToolButton.InstantPopup)
+        snooze_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         snooze_menu = QMenu(self)
         snooze_menu.addAction(self.tr("15 minutes"), lambda: self._snooze(15))
         snooze_menu.addAction(self.tr("30 minutes"), lambda: self._snooze(30))
@@ -149,7 +133,7 @@ class LogWorkDialog(QDialog):
         self.log_layout.addStretch(1)
         self.log_widget.setVisible(False)
 
-        last_registration_issue_number = Configuration.get(
+        last_registration_issue_number = self.config_store.get(
             "last_registration_issue_number", -1
         )
         if last_registration_issue_number != -1:
@@ -190,14 +174,14 @@ class LogWorkDialog(QDialog):
         self.close()
         self.internal_close_flag = False
 
-    def closeEvent(self, event):
+    def closeEvent(self, event: QCloseEvent) -> None:
         LOG.debug("EventHandler: closeEvent")
         event.ignore()
         if self.internal_close_flag:
             LOG.debug("EventHandler: closeEvent: Internal close. Not doing anything.")
             self.hide()
             return
-        next_run = Configuration.get("next_run")
+        next_run = self.config_store.get("next_run")
         if len(next_run) == 0 or pendulum.parse(next_run) < pendulum.now():
             LOG.debug("Snoozing due to closeEvent")
             self._snooze(15)
@@ -205,43 +189,18 @@ class LogWorkDialog(QDialog):
             LOG.debug("Just closing.")
             self.hide()
 
-    def eventFilter(self, widget, event):
-        if event.type() == QEvent.KeyPress and event.key() in (
-            Qt.Key_Enter,
-            Qt.Key_Return,
-            Qt.Key_Escape,
+    def eventFilter(self, widget: QWidget, event: QEvent) -> bool:
+        if event.type() == QEvent.Type.KeyPress and event.key() in (
+            Qt.Key.Key_Enter,
+            Qt.Key.Key_Return,
+            Qt.Key.Key_Escape,
         ):
             LOG.debug("Ignoring keystroke")
             return True
         else:
             return super(LogWorkDialog, self).eventFilter(widget, event)
 
-    def _retrieve_relevant_issues(self):
-        where_items = {
-            "team_name": Configuration.get("tp_team_name", DEFAULT_TP_TEAM_NAME),
-            "user_id": Configuration.get("tp_userid", ""),
-        }
-        get_params = {
-            "access_token": Configuration.get("tp_access_token", ""),
-            "orderByDesc": "Assignable.Id",
-            "format": "json",
-            "take": Configuration.get("tp_take", DEFAULT_TP_TAKE),
-            "where": Configuration.get("tp_where", DEFAULT_TP_WHERE).format(
-                **where_items
-            ),
-        }
-        api_request = requests.get(
-            urljoin(
-                Configuration.get("tp_url", DEFAULT_TP_URL), "/api/v1/TeamAssignments"
-            ),
-            params=get_params,
-        )
-        if api_request.status_code == 200:
-            return [x["Assignable"] for x in json.loads(api_request.text)["Items"]]
-        else:
-            return []
-
-    def _snooze(self, duration):
+    def _snooze(self, duration: int) -> None:
         if duration > 0:
             LOG.debug("Snooze: Normal duration: %d", duration)
             next_run = pendulum.now().add(minutes=duration)
@@ -252,16 +211,16 @@ class LogWorkDialog(QDialog):
             elif duration == -2:
                 next_run = pendulum.now().next(pendulum.MONDAY).add(hours=6)
 
-        Configuration.set("next_run", next_run.for_json())
+        self.config_store.set("next_run", next_run.for_json())
         self.hide()
 
-    def _schedule_next_run(self):
-        next_run = Configuration.get("next_run")
+    def _schedule_next_run(self) -> None:
+        next_run = self.config_store.get("next_run")
         if len(next_run) == 0 or pendulum.parse(next_run) < pendulum.now():
             LOG.debug("Schedule run in the future")
-            if Configuration.get("schedule_type", DEFAULT_SCHEDULE_TYPE) == "schedule":
+            if self.config_store.get("schedule_type", DEFAULT_SCHEDULE_TYPE) == "schedule":
                 scheduled_run = None
-                for time_value in Configuration.get(
+                for time_value in self.config_store.get(
                     "schedule_list", DEFAULT_SCHEDULE_LIST
                 ):
                     hours, minutes = time_value.split(":")
@@ -272,14 +231,14 @@ class LogWorkDialog(QDialog):
                         scheduled_run = pendulum_time
                         break
                 if scheduled_run is None:
-                    hours, minutes = Configuration.get(
+                    hours, minutes = self.config_store.get(
                         "schedule_list", DEFAULT_SCHEDULE_LIST
                     )[0].split(":")
                     scheduled_run = pendulum.tomorrow().add(
                         hours=int(hours), minutes=int(minutes)
                     )
             else:
-                interval_hours = Configuration.get(
+                interval_hours = self.config_store.get(
                     "interval_hours", DEFAULT_INTERVAL_HOURS
                 )
                 interval_minutes = Configuration.get(
@@ -293,53 +252,25 @@ class LogWorkDialog(QDialog):
         else:
             LOG.debug("We were probably executed manually. Won't schedule.")
 
-    def _register_action(self):
-        self.register_issue_number = self.issue_selector.currentData()
-        self.register_issue_title = self.issue_selector.currentText()
-        self.register_time_spent = self.duration_selector.currentData()
-        self.submit_thread_pool.start(QRunnable.create(self.submit_registration))
-        registration_history = Configuration.get("registration_history", [])
-        registration_history.append(
-            {
-                "datetime": str(pendulum.now()),
-                "issue_number": self.register_issue_number,
-                "issue_title": self.register_issue_title,
-                "time_spent": self.register_time_spent,
-            }
-        )
-        registration_history = registration_history[-5:]
-        Configuration.set("registration_history", registration_history)
+    def _register_action(self) -> None:
+        issue_number = self.issue_selector.currentData()
+        time_spent = self.duration_selector.currentData()
 
-        Configuration.set("last_registration_issue_number", self.register_issue_number)
+        self.submit_thread_pool.start(
+            QRunnable.create(
+                self.tp_client.submit_time_registration, issue_number, time_spent
+            )
+        )
+
+        self.config_store.set("last_registration_issue_number", issue_number)
+        self.config_store.set("last_registration_time_spent", time_spent)
+        self.config_store.set("last_registration_datetime", str(pendulum.now()))
         self._schedule_next_run()
-        self.internal_close()
+        self.close()
 
-    def _cancel_action(self):
+    def _cancel_action(self) -> None:
         self._schedule_next_run()
-        self.internal_close()
-
-    def submit_registration(self):
-        LOG.debug(
-            "Submit a registration: %s: %d hours",
-            self.register_issue_number,
-            self.register_time_spent,
-        )
-        json_payload = {
-            "User": {"Id": Configuration.get("tp_userid", "")},
-            "Spent": self.register_time_spent,
-            "Description": ".",
-            "Assignable": {"Id": self.register_issue_number},
-        }
-
-        params = {"access_token": Configuration.get("tp_access_token", "")}
-
-        requests.post(
-            urljoin(Configuration.get("tp_url", ""), "/api/v1/times"),
-            params=params,
-            json=json_payload,
-        )
-
-        LOG.debug("Done Submitting.")
+        self.close()
 
 
 class SystemTrayIcon(QSystemTrayIcon):
@@ -347,11 +278,12 @@ class SystemTrayIcon(QSystemTrayIcon):
     Create a system-tray icon for Zup and add our very basic menu to it.
     """
 
-    def __init__(self, icon, parent=None):
+    def __init__(self, icon: QIcon, parent: Optional[QWidget] = None) -> None:
         QSystemTrayIcon.__init__(self, icon, parent)
         self.parent = parent
-        self._logwork_dialog = None
-        self._settings_dialog = None
+        self.config_store = ConfigStore()
+        self._logwork_dialog: Optional[LogWorkDialog] = None
+        self._settings_dialog: Optional[Configuration] = None
         self.setToolTip(self.tr("Log work to TargetProcess"))
         self.main_menu = QMenu(parent)
         log_work_item = self.main_menu.addAction(self.tr("Log work now"))
@@ -373,17 +305,17 @@ class SystemTrayIcon(QSystemTrayIcon):
         # Set up a wake-timer that checks every minute if it is time to show a
         # LogWorkDialog.
         self.wake_timer = QTimer(self.parent)
-        self.wake_timer.setTimerType(Qt.VeryCoarseTimer)
+        self.wake_timer.setTimerType(Qt.TimerType.VeryCoarseTimer)
         self.wake_timer.timeout.connect(self._timer_tick)
         self.wake_timer.start(60 * 1000)
         self._timer_tick()
 
-    def _activated_action(self, reason):
+    def _activated_action(self, reason: QSystemTrayIcon.ActivationReason) -> None:
         LOG.debug(reason)
         # if reason == self.ActivationReason.Trigger:
         #     self.main_menu.popup(QCursor.pos())
 
-    def _settings_action(self):
+    def _settings_action(self) -> None:
         LOG.debug("Open settings window")
         if self._settings_dialog is not None:
             self._settings_dialog.close()
@@ -391,15 +323,15 @@ class SystemTrayIcon(QSystemTrayIcon):
         self._settings_dialog = Configuration(self.parent)
         self._settings_dialog.show()
 
-    def _log_work(self):
+    def _log_work(self) -> None:
         LOG.debug("Open LogWorkDialog.")
 
         if self._logwork_dialog is not None:
             self._logwork_dialog.internal_close()
             self._logwork_dialog.destroy()
-        self._logwork_dialog = LogWorkDialog(self.parent)
+        self._logwork_dialog = LogWorkDialog(self.config_store, self.parent)
 
-    def _timer_tick(self):
+    def _timer_tick(self) -> None:
         try:
             if self._logwork_dialog.isVisible():
                 LOG.debug("Window is already open.")
@@ -407,7 +339,7 @@ class SystemTrayIcon(QSystemTrayIcon):
         except AttributeError:
             pass
 
-        next_run = Configuration.get("next_run")
+        next_run = self.config_store.get("next_run")
         if len(next_run) == 0:
             LOG.debug("We have never executed. We should do that right now..")
             self._log_work()
@@ -419,9 +351,13 @@ class SystemTrayIcon(QSystemTrayIcon):
                 self._log_work()
 
 
-def main():
-    Configuration.set("next_run", "")
-
+def main() -> None:
+    config_store = ConfigStore()
+    config_store.set("next_run", "")
+    logging.basicConfig(
+        level=logging.DEBUG,
+        format="%(levelname)-8s %(funcName)s:%(filename)s:%(lineno)d %(message)s",
+    )
     app = QApplication(sys.argv)
     root_widget = QWidget()
     tray_icon = SystemTrayIcon(QIcon(resolve_icon("zup.png")), root_widget)
@@ -432,3 +368,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
