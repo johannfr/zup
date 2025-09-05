@@ -35,4 +35,4 @@ the log-work-window will snooze for 15 minutes.
 
 Here you enter your settings. I hope this is self-explanatory.
 
-![zup-log-settings-window](https://github.com/user-attachments/assets/36462d68-926b-4a6b-8cc2-21d0b6aa62f5)
+![zup-log-settings-window](https://github.com/user-attachments/assets/7f6cce94-f2ae-447e-aca1-05d36aec5f05)
