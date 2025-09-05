@@ -4,14 +4,18 @@ A simple client for the TargetProcess API.
 
 import json
 import logging
-
 from typing import Any, Dict, List
 
 import requests
 from requests.compat import urljoin
 
 from zup.configuration import Configuration
-from zup.constants import DEFAULT_TP_TAKE, DEFAULT_TP_URL
+from zup.constants import (
+    DEFAULT_TP_TAKE,
+    DEFAULT_TP_TEAM_NAME,
+    DEFAULT_TP_URL,
+    DEFAULT_TP_WHERE,
+)
 
 LOG = logging.getLogger(__name__)
 
@@ -28,14 +32,19 @@ class TargetProcessClient:
         """
         Retrieves a list of relevant issues from TargetProcess.
         """
+
+        where_items = {
+            "team_name": self.configuration.get("tp_team_name", DEFAULT_TP_TEAM_NAME),
+            "user_id": self.configuration.get("tp_userid", ""),
+        }
         get_params = {
             "access_token": self.configuration.get("tp_access_token", ""),
             "orderByDesc": "Assignable.Id",
             "format": "json",
             "take": self.configuration.get("tp_take", DEFAULT_TP_TAKE),
-            "where": f"(Team.Name eq '{self.configuration.get('tp_team_name', '')}')"
-            "and(Assignable.EntityType.Name eq 'UserStory')"
-            "and(EntityState.Name ne 'Done')",
+            "where": self.configuration.get("tp_where", DEFAULT_TP_WHERE).format(
+                **where_items
+            ),
         }
         api_request = requests.get(
             urljoin(
