@@ -8,5 +8,6 @@ dependencies = [
     "appdirs>=1.4.4",
     "pendulum>=3.0.0",
     "pyside6>=6.9.0",
+    "python-dotenv>=1.0.0",
     "requests>=2.32.3",
 ]
