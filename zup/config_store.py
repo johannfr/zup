@@ -59,6 +59,22 @@ class ConfigStore:
         self._config[parameter] = value
         self._write_config()
 
+    def get_legacy_tp_keys(self) -> list[str]:
+        """
+        Returns any config keys that start with 'tp_'.
+
+        Used by the migration prompt in main() to detect stale TargetProcess config.
+        """
+        return [k for k in self._config if k.startswith("tp_")]
+
+    def remove_keys(self, keys: list[str]) -> None:
+        """
+        Removes the given keys from config and writes to disk.
+        """
+        for key in keys:
+            self._config.pop(key, None)
+        self._write_config()
+
     def _write_config(self) -> None:
         """
         Writes the configuration to disk.

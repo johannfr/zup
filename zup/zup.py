@@ -1,5 +1,5 @@
 """
-A PySide6 (Qt6) application for registering time spent to TargetProcess issues.
+A PySide6 (Qt6) application for registering time spent on ClickUp tasks.
 """
 
 import logging
@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QMenu,
+    QMessageBox,
     QPushButton,
     QSystemTrayIcon,
     QToolButton,
@@ -25,15 +26,16 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from zup.clickup_client import ClickUpClient
 from zup.config_store import ConfigStore
 from zup.configuration import Configuration
 from zup.constants import (
+    DEFAULT_CLICKUP_LISTS,
     DEFAULT_INTERVAL_HOURS,
     DEFAULT_INTERVAL_MINUTES,
     DEFAULT_SCHEDULE_LIST,
     DEFAULT_SCHEDULE_TYPE,
 )
-from zup.targetprocess_client import TargetProcessClient
 
 LOG = logging.getLogger(__name__)
 
@@ -75,15 +77,25 @@ class LogWorkDialog(QDialog):
         self.installEventFilter(self)
         self.internal_close_flag = False
         self.submit_thread_pool = QThreadPool()
-        self.tp_client = TargetProcessClient(self.config_store)
+
+        token = self.config_store.get("clickup_token", "")
+        list_ids = self.config_store.get("clickup_lists", DEFAULT_CLICKUP_LISTS)
+        try:
+            self.cu_client = ClickUpClient(user_token=token)
+            raw_issues = self.cu_client.get_relevant_issues(list_ids)
+        except Exception:
+            LOG.exception("Failed to initialise ClickUp client or fetch issues")
+            self.cu_client = None
+            raw_issues = []
 
         self.issue_selector = QComboBox(self)
         self.issue_selector.setEditable(True)
         relevant_issues = []
-        for issue in self.tp_client.get_relevant_issues():
-            issue_display_string = f"TP{issue['Id']}: {issue['Name']}"
+        for issue in raw_issues:
+            list_prefix = f"[{issue['list_name']}] " if issue.get("list_name") else ""
+            issue_display_string = f"{list_prefix}{issue['name']}  ({issue['id']})"
             relevant_issues.append(issue_display_string)
-            self.issue_selector.addItem(issue_display_string, int(issue["Id"]))
+            self.issue_selector.addItem(issue_display_string, issue["id"])
 
         completer = QCompleter(relevant_issues)
         completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
@@ -95,9 +107,9 @@ class LogWorkDialog(QDialog):
 
         self.duration_selector = QComboBox()
         duration_values = [
-            [self.tr("4 hours"), 4],
-            [self.tr("1 hour"), 1],
-            [self.tr("1 day"), 8],
+            [self.tr("4 hours"), 4.0],
+            [self.tr("1 hour"), 1.0],
+            [self.tr("1 day"), 8.0],
         ]
         for duration in duration_values:
             self.duration_selector.addItem(*duration)
@@ -144,7 +156,7 @@ class LogWorkDialog(QDialog):
         self.log_layout = QVBoxLayout(self.log_widget)
         for item in reversed(self.config_store.get("registration_history", [])):
             item_datetime = pendulum.parse(item["datetime"]).format(
-                "YYYY-MM-DD HH:MM:ss"
+                "YYYY-MM-DD HH:mm:ss"
             )
             self.log_layout.addWidget(
                 QLabel(
@@ -154,11 +166,9 @@ class LogWorkDialog(QDialog):
         self.log_layout.addStretch(1)
         self.log_widget.setVisible(False)
 
-        last_registration_issue_number = self.config_store.get(
-            "last_registration_issue_number", -1
-        )
-        if last_registration_issue_number != -1:
-            last_index = self.issue_selector.findData(last_registration_issue_number)
+        last_issue_id = self.config_store.get("last_registration_issue_id", "")
+        if last_issue_id:
+            last_index = self.issue_selector.findData(last_issue_id)
             if last_index >= 0:
                 self.issue_selector.setCurrentIndex(last_index)
 
@@ -210,7 +220,7 @@ class LogWorkDialog(QDialog):
             LOG.debug("Just closing.")
             self.hide()
 
-    def eventFilter(self, widget: QWidget, event: QEvent) -> bool:
+    def eventFilter(self, widget, event: QEvent) -> bool:
         if event.type() == QEvent.Type.KeyPress and event.key() in (
             Qt.Key.Key_Enter,
             Qt.Key.Key_Return,
@@ -277,27 +287,30 @@ class LogWorkDialog(QDialog):
             LOG.debug("We were probably executed manually. Won't schedule.")
 
     def _register_action(self) -> None:
-        issue_number = self.issue_selector.currentData()
-        issue_title = self.issue_selector.currentText()
-        time_spent = self.duration_selector.currentData()
+        issue_id: str = self.issue_selector.currentData()
+        issue_title: str = self.issue_selector.currentText()
+        decimal_hours: float = self.duration_selector.currentData()
 
-        self.submit_thread_pool.start(
-            Worker(self.tp_client.submit_time_registration, issue_number, time_spent)
-        )
+        if self.cu_client is not None:
+            self.submit_thread_pool.start(
+                Worker(self.cu_client.submit_time_registration, issue_id, decimal_hours)
+            )
+        else:
+            LOG.warning("No ClickUp client available; skipping time submission.")
 
         registration_history = self.config_store.get("registration_history", [])
         registration_history.append(
             {
                 "datetime": str(pendulum.now()),
-                "issue_number": issue_number,
+                "issue_id": issue_id,
                 "issue_title": issue_title,
-                "time_spent": time_spent,
+                "time_spent": decimal_hours,
             }
         )
         registration_history = registration_history[-5:]
         self.config_store.set("registration_history", registration_history)
-        self.config_store.set("last_registration_issue_number", issue_number)
-        self.config_store.set("last_registration_time_spent", time_spent)
+        self.config_store.set("last_registration_issue_id", issue_id)
+        self.config_store.set("last_registration_time_spent", decimal_hours)
         self.config_store.set("last_registration_datetime", str(pendulum.now()))
         self._schedule_next_run()
         self.close()
@@ -314,11 +327,11 @@ class SystemTrayIcon(QSystemTrayIcon):
 
     def __init__(self, icon: QIcon, parent: Optional[QWidget] = None) -> None:
         QSystemTrayIcon.__init__(self, icon, parent)
-        self.parent = parent
+        self._parent_widget = parent
         self.config_store = ConfigStore()
         self._logwork_dialog: Optional[LogWorkDialog] = None
         self._settings_dialog: Optional[Configuration] = None
-        self.setToolTip(self.tr("Log work to TargetProcess"))
+        self.setToolTip(self.tr("Log work to ClickUp"))
         self.main_menu = QMenu(parent)
         log_work_item = self.main_menu.addAction(self.tr("Log work now"))
         log_work_item.triggered.connect(self._log_work)
@@ -338,7 +351,7 @@ class SystemTrayIcon(QSystemTrayIcon):
 
         # Set up a wake-timer that checks every minute if it is time to show a
         # LogWorkDialog.
-        self.wake_timer = QTimer(self.parent)
+        self.wake_timer = QTimer(self._parent_widget)
         self.wake_timer.setTimerType(Qt.TimerType.VeryCoarseTimer)
         self.wake_timer.timeout.connect(self._timer_tick)
         self.wake_timer.start(60 * 1000)
@@ -346,15 +359,13 @@ class SystemTrayIcon(QSystemTrayIcon):
 
     def _activated_action(self, reason: QSystemTrayIcon.ActivationReason) -> None:
         LOG.debug(reason)
-        # if reason == self.ActivationReason.Trigger:
-        #     self.main_menu.popup(QCursor.pos())
 
     def _settings_action(self) -> None:
         LOG.debug("Open settings window")
         if self._settings_dialog is not None:
             self._settings_dialog.close()
             self._settings_dialog.destroy()
-        self._settings_dialog = Configuration(self.config_store, self.parent)
+        self._settings_dialog = Configuration(self.config_store, self._parent_widget)
         self._settings_dialog.show()
 
     def _log_work(self) -> None:
@@ -363,7 +374,7 @@ class SystemTrayIcon(QSystemTrayIcon):
         if self._logwork_dialog is not None:
             self._logwork_dialog.internal_close()
             self._logwork_dialog.destroy()
-        self._logwork_dialog = LogWorkDialog(self.config_store, self.parent)
+        self._logwork_dialog = LogWorkDialog(self.config_store, self._parent_widget)
 
     def _timer_tick(self) -> None:
         try:
@@ -372,6 +383,12 @@ class SystemTrayIcon(QSystemTrayIcon):
                 return
         except AttributeError:
             pass
+
+        if not self.config_store.get("clickup_token", ""):
+            LOG.debug("No ClickUp token configured. Opening settings.")
+            if self._settings_dialog is None or not self._settings_dialog.isVisible():
+                self._settings_action()
+            return
 
         next_run = self.config_store.get("next_run")
         if len(next_run) == 0:
@@ -385,6 +402,34 @@ class SystemTrayIcon(QSystemTrayIcon):
                 self._log_work()
 
 
+def _maybe_migrate_tp_config(config_store: ConfigStore) -> None:
+    """
+    If legacy TargetProcess keys are present in config, prompt the user to
+    remove them. This runs once at startup before the main window is shown.
+    """
+    legacy_keys = config_store.get_legacy_tp_keys()
+    if not legacy_keys:
+        return
+
+    msg = QMessageBox()
+    msg.setWindowTitle("Legacy configuration found")
+    msg.setText(
+        "Your configuration contains legacy TargetProcess settings:\n\n"
+        + "\n".join(f"  {k}" for k in sorted(legacy_keys))
+        + "\n\nWould you like to remove them? "
+        "(Keeping stale access tokens in your config is not recommended.)"
+    )
+    msg.setStandardButtons(
+        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+    )
+    msg.setDefaultButton(QMessageBox.StandardButton.Yes)
+    if msg.exec() == QMessageBox.StandardButton.Yes:
+        config_store.remove_keys(legacy_keys)
+        LOG.debug("Removed legacy TP keys: %s", legacy_keys)
+    else:
+        LOG.debug("User chose to keep legacy TP keys.")
+
+
 def main() -> None:
     config_store = ConfigStore()
     config_store.set("next_run", "")
@@ -393,6 +438,7 @@ def main() -> None:
         format="%(levelname)-8s %(funcName)s:%(filename)s:%(lineno)d %(message)s",
     )
     app = QApplication(sys.argv)
+    _maybe_migrate_tp_config(config_store)
     root_widget = QWidget()
     tray_icon = SystemTrayIcon(QIcon(resolve_icon("zup.png")), root_widget)
     tray_icon.show()

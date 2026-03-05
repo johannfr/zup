@@ -1,7 +1,9 @@
 import logging
+import re
 import sys
+from typing import Optional
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QObject, QThread, Qt, Signal, Slot
 from PySide6.QtWidgets import (
     QApplication,
     QButtonGroup,
@@ -12,29 +14,34 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QListWidget,
-    QPlainTextEdit,
+    QListWidgetItem,
+    QMessageBox,
     QPushButton,
     QRadioButton,
     QSpinBox,
+    QTreeWidget,
+    QTreeWidgetItem,
     QVBoxLayout,
 )
 
 from zup.config_store import ConfigStore
 from zup.constants import (
+    DEFAULT_CLICKUP_LISTS,
     DEFAULT_INTERVAL_HOURS,
     DEFAULT_INTERVAL_MINUTES,
     DEFAULT_SCHEDULE_LIST,
     DEFAULT_SCHEDULE_TYPE,
-    DEFAULT_TP_TAKE,
-    DEFAULT_TP_TEAM_NAME,
-    DEFAULT_TP_URL,
-    DEFAULT_TP_WHERE,
 )
+
+LOG = logging.getLogger(__name__)
+
+# Regex for extracting the list ID from a list widget entry like "My List (abc123)"
+_LIST_ENTRY_RE = re.compile(r"^(.*)\s+\(([^)]+)\)$")
 
 
 class TimeSpinner(QSpinBox):
     """
-    A quick-and-dirty way of getting a spinnger with a leading-zero
+    A QSpinBox that always displays its value with a leading zero.
     """
 
     def __init__(self, parent=None):
@@ -44,9 +51,156 @@ class TimeSpinner(QSpinBox):
         return "{:02d}".format(val)
 
 
+# ---------------------------------------------------------------------------
+# List picker dialog
+# ---------------------------------------------------------------------------
+
+class _TreeLoaderThread(QThread):
+    """
+    Background thread that fetches the full ClickUp workspace tree.
+
+    Using QThread (a QObject subclass) instead of QRunnable so that Python
+    retains ownership and the signal source is never garbage-collected while
+    the thread is running.
+    """
+
+    finished = Signal(list)   # emits the workspace tree on success
+    error = Signal(str)       # emits an error message on failure
+
+    def __init__(self, user_token: str, parent: Optional[QObject] = None) -> None:
+        super().__init__(parent)
+        self._user_token = user_token
+
+    def run(self) -> None:
+        try:
+            from zup.clickup_client import ClickUpClient
+            client = ClickUpClient(user_token=self._user_token)
+            tree = client.get_workspace_tree()
+            self.finished.emit(tree)
+        except Exception as exc:
+            self.error.emit(str(exc))
+
+
+class ListPickerDialog(QDialog):
+    """
+    A dialog that shows the full ClickUp workspace tree and lets the user
+    select lists to add to their configuration.
+
+    The user token is passed at construction time (taken from the token field
+    in the parent Configuration dialog before it has been saved).
+    """
+
+    def __init__(self, user_token: str, parent=None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle(self.tr("Add ClickUp Lists"))
+        self.setMinimumSize(420, 480)
+        self._selected: list[dict] = []   # [{"id": str, "name": str}]
+
+        # Loading label (visible while fetching)
+        self._loading_label = QLabel(self.tr("Loading lists from ClickUp..."))
+        self._loading_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        # Tree widget (hidden until loaded)
+        self._tree = QTreeWidget()
+        self._tree.setHeaderHidden(True)
+        self._tree.setVisible(False)
+
+        # Error label (hidden unless something goes wrong)
+        self._error_label = QLabel()
+        self._error_label.setVisible(False)
+        self._error_label.setWordWrap(True)
+
+        button_box = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok
+            | QDialogButtonBox.StandardButton.Cancel
+        )
+        button_box.accepted.connect(self._accept_action)
+        button_box.rejected.connect(self.reject)
+        self._ok_button = button_box.button(QDialogButtonBox.StandardButton.Ok)
+        self._ok_button.setEnabled(False)
+
+        layout = QVBoxLayout()
+        layout.addWidget(self._loading_label)
+        layout.addWidget(self._tree)
+        layout.addWidget(self._error_label)
+        layout.addWidget(button_box)
+        self.setLayout(layout)
+
+        # Kick off background load. Parenting the thread to self (the dialog)
+        # ensures Qt keeps it alive for at least as long as the dialog lives,
+        # and Python retains ownership via self._loader.
+        self._loader = _TreeLoaderThread(user_token=user_token, parent=self)
+        self._loader.finished.connect(self._on_tree_loaded)
+        self._loader.error.connect(self._on_tree_error)
+        self._loader.start()
+
+    @Slot(list)
+    def _on_tree_loaded(self, tree: list) -> None:
+        self._loading_label.setVisible(False)
+        self._populate_tree(tree)
+        self._tree.setVisible(True)
+        self._ok_button.setEnabled(True)
+
+    @Slot(str)
+    def _on_tree_error(self, message: str) -> None:
+        self._loading_label.setVisible(False)
+        self._error_label.setText(
+            self.tr("Failed to load lists: ") + message
+        )
+        self._error_label.setVisible(True)
+
+    def _populate_tree(self, tree: list) -> None:
+        for space in tree:
+            space_item = QTreeWidgetItem(self._tree, [space["name"]])
+            space_item.setFlags(space_item.flags() & ~Qt.ItemFlag.ItemIsUserCheckable)
+
+            # Folders within the space
+            for folder in space.get("folders", []):
+                folder_item = QTreeWidgetItem(space_item, [folder["name"]])
+                folder_item.setFlags(
+                    folder_item.flags() & ~Qt.ItemFlag.ItemIsUserCheckable
+                )
+                for lst in folder.get("lists", []):
+                    self._add_list_item(folder_item, lst)
+
+            # Folderless lists directly under the space
+            for lst in space.get("lists", []):
+                self._add_list_item(space_item, lst)
+
+    def _add_list_item(self, parent: QTreeWidgetItem, lst: dict) -> None:
+        label = f"{lst['name']} ({lst['id']})"
+        item = QTreeWidgetItem(parent, [label])
+        item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+        item.setCheckState(0, Qt.CheckState.Unchecked)
+        item.setData(0, Qt.ItemDataRole.UserRole, lst)
+
+    def _accept_action(self) -> None:
+        self._selected = []
+        root = self._tree.invisibleRootItem()
+        self._collect_checked(root)
+        self.accept()
+
+    def _collect_checked(self, parent: QTreeWidgetItem) -> None:
+        for i in range(parent.childCount()):
+            child = parent.child(i)
+            if child.checkState(0) == Qt.CheckState.Checked:
+                data = child.data(0, Qt.ItemDataRole.UserRole)
+                if data:
+                    self._selected.append(data)
+            self._collect_checked(child)
+
+    def selected_lists(self) -> list[dict]:
+        """Returns list of {"id": str, "name": str} for all checked items."""
+        return self._selected
+
+
+# ---------------------------------------------------------------------------
+# Main configuration dialog
+# ---------------------------------------------------------------------------
+
 class Configuration(QDialog):
     """
-    Class for managing the application configuration.
+    Application settings dialog.
     """
 
     def __init__(self, config_store: ConfigStore, parent=None):
@@ -61,23 +215,36 @@ class Configuration(QDialog):
             return widget
 
         self.setWindowTitle(self.tr("Configuration"))
-        self.setMinimumWidth(400)
+        self.setMinimumWidth(460)
 
-        tp_userid = self.config_store.get("tp_userid", -1)
-        tp_take = self.config_store.get("tp_take", DEFAULT_TP_TAKE)
-        self.tp_url = QLineEdit(self.config_store.get("tp_url", DEFAULT_TP_URL))
-        self.tp_userid = QLineEdit(str(tp_userid) if tp_userid >= 0 else "")
-        self.tp_access_token = QLineEdit(self.config_store.get("tp_access_token", ""))
-        self.tp_team_name = QLineEdit(
-            self.config_store.get("tp_team_name", DEFAULT_TP_TEAM_NAME)
+        # --- ClickUp section ---
+        self.clickup_token = QLineEdit(
+            self.config_store.get("clickup_token", "")
         )
-        self.tp_take = QLineEdit(str(tp_take))
-        self.tp_where = QPlainTextEdit(
-            self.config_store.get("tp_where", DEFAULT_TP_WHERE)
-        )
-        self.tp_where_reset_button = QPushButton(self.tr("Reset Where to default"))
-        self.tp_where_reset_button.clicked.connect(self._reset_where_action)
+        self.clickup_token.setPlaceholderText(self.tr("ClickUp personal API token"))
+        self.clickup_token.setEchoMode(QLineEdit.EchoMode.Password)
 
+        # List of ClickUp lists to pull tasks from
+        self._lists_widget = QListWidget()
+        self._lists_widget.setMaximumHeight(120)
+        for entry in self.config_store.get("clickup_lists_display", []):
+            self._lists_widget.addItem(entry)
+
+        add_list_button = QPushButton(self.tr("&Add list..."))
+        add_list_button.clicked.connect(self._add_list_action)
+        remove_list_button = QPushButton(self.tr("&Remove selected"))
+        remove_list_button.clicked.connect(self._remove_list_action)
+
+        lists_buttons_layout = QHBoxLayout()
+        lists_buttons_layout.addWidget(add_list_button)
+        lists_buttons_layout.addWidget(remove_list_button)
+        lists_buttons_layout.addStretch()
+
+        lists_layout = QVBoxLayout()
+        lists_layout.addWidget(self._lists_widget)
+        lists_layout.addLayout(lists_buttons_layout)
+
+        # --- Schedule section (unchanged) ---
         self.schedule_type_group = QButtonGroup()
 
         self.schedule_radio_button = QRadioButton(self.tr("Schedule"))
@@ -103,10 +270,10 @@ class Configuration(QDialog):
         self.schedule_time_minute.setRange(0, 59)
         self.schedule_time_minute.setWrapping(True)
         schedule_time_layout.addWidget(self.schedule_time_minute)
-        schedule_time_layout.setAlignment(Qt.AlignRight)
+        schedule_time_layout.setAlignment(Qt.AlignmentFlag.AlignRight)
         schedule_time_layout.setSpacing(0)
         add_time_button = managed_widget(
-            self.schedule_widgets, QPushButton(self.tr("&Add"))
+            self.schedule_widgets, QPushButton(self.tr("A&dd"))
         )
         add_time_button.clicked.connect(self._add_time_action)
         schedule_time_layout.addSpacing(5)
@@ -121,15 +288,15 @@ class Configuration(QDialog):
         self.schedule_list.itemSelectionChanged.connect(self._schedule_item_action)
         schedule_list_layout = QHBoxLayout()
         schedule_list_layout.addWidget(self.schedule_list)
-        schedule_list_layout.setAlignment(Qt.AlignRight)
+        schedule_list_layout.setAlignment(Qt.AlignmentFlag.AlignRight)
         schedule_layout.addLayout(schedule_list_layout)
         self.remove_time_button = managed_widget(
-            self.schedule_widgets, QPushButton(self.tr("&Remove"))
+            self.schedule_widgets, QPushButton(self.tr("Remo&ve"))
         )
         self.remove_time_button.setEnabled(False)
         self.remove_time_button.clicked.connect(self._remove_time_action)
         schedule_remove_layout = QHBoxLayout()
-        schedule_remove_layout.setAlignment(Qt.AlignRight)
+        schedule_remove_layout.setAlignment(Qt.AlignmentFlag.AlignRight)
         schedule_remove_layout.addWidget(self.remove_time_button)
         schedule_layout.addLayout(schedule_remove_layout)
 
@@ -165,27 +332,25 @@ class Configuration(QDialog):
         )
         interval_time_layout.addWidget(self.interval_time_minute)
         interval_time_layout.setSpacing(0)
-        interval_time_layout.setAlignment(Qt.AlignRight)
+        interval_time_layout.setAlignment(Qt.AlignmentFlag.AlignRight)
 
-        button_box = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
+        button_box = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Save
+            | QDialogButtonBox.StandardButton.Cancel
+        )
         button_box.accepted.connect(self._save_action)
         button_box.rejected.connect(self._cancel_action)
 
         layout = QFormLayout()
-        layout.addRow(self.tr("TP &URL"), self.tp_url)
-        layout.addRow(self.tr("TP User&Id"), self.tp_userid)
-        layout.addRow(self.tr("TP &Access-token"), self.tp_access_token)
-        layout.addRow(self.tr("TP &Team name"), self.tp_team_name)
-        layout.addRow(self.tr("TP &No. results"), self.tp_take)
-        layout.addRow(self.tr("TP &Where"), self.tp_where)
-        layout.addRow(self.tr("Placeholders"), QLabel("{user_id}, {team_name}"))
-        layout.addRow("", self.tp_where_reset_button)
+        layout.addRow(self.tr("ClickUp &Token"), self.clickup_token)
+        layout.addRow(self.tr("ClickUp Lists"), lists_layout)
         layout.addRow(self.schedule_radio_button)
         layout.addRow(schedule_layout)
         layout.addRow(self.interval_radio_button)
         layout.addRow(interval_layout)
         layout.addRow(button_box)
         self.setLayout(layout)
+
         if self.config_store.get("schedule_type", DEFAULT_SCHEDULE_TYPE) == "schedule":
             self.schedule_radio_button.setChecked(True)
             self._schedule_radio_action()
@@ -193,17 +358,61 @@ class Configuration(QDialog):
             self.interval_radio_button.setChecked(True)
             self._interval_radio_action()
 
-    def _reset_where_action(self):
-        self.tp_where.setPlainText(DEFAULT_TP_WHERE)
+    # --- ClickUp list management ---
 
-    def _save_action(self):
-        self.config_store.set("tp_url", self.tp_url.text())
-        self.config_store.set("tp_userid", int(self.tp_userid.text()))
-        self.config_store.set("tp_access_token", self.tp_access_token.text())
-        self.config_store.set("tp_team_name", self.tp_team_name.text())
-        self.config_store.set("tp_take", int(self.tp_take.text()))
+    def _add_list_action(self) -> None:
+        token = self.clickup_token.text().strip()
+        if not token:
+            QMessageBox.warning(
+                self,
+                self.tr("No token"),
+                self.tr(
+                    "Please enter a ClickUp API token before adding lists."
+                ),
+            )
+            return
+
+        # Collect IDs already in the list widget to avoid duplicates
+        existing_ids: set[str] = set()
+        for i in range(self._lists_widget.count()):
+            entry = self._lists_widget.item(i).text()
+            m = _LIST_ENTRY_RE.match(entry)
+            if m:
+                existing_ids.add(m.group(2))
+
+        self._picker = ListPickerDialog(user_token=token, parent=self)
+        if self._picker.exec() == QDialog.DialogCode.Accepted:
+            for lst in self._picker.selected_lists():
+                if lst["id"] not in existing_ids:
+                    self._lists_widget.addItem(f"{lst['name']} ({lst['id']})")
+                    existing_ids.add(lst["id"])
+
+    def _remove_list_action(self) -> None:
+        row = self._lists_widget.currentRow()
+        if row >= 0:
+            self._lists_widget.takeItem(row)
+
+    # --- Save / Cancel ---
+
+    def _save_action(self) -> None:
+        self.config_store.set("clickup_token", self.clickup_token.text().strip())
+
+        display_entries = [
+            self._lists_widget.item(i).text()
+            for i in range(self._lists_widget.count())
+        ]
+        # Parse IDs out for runtime use; keep display strings for the UI
+        list_ids = []
+        for entry in display_entries:
+            m = _LIST_ENTRY_RE.match(entry)
+            if m:
+                list_ids.append(m.group(2))
+        self.config_store.set("clickup_lists", list_ids)
+        self.config_store.set("clickup_lists_display", display_entries)
+
         schedule_items = [
-            item.text() for item in self.schedule_list.findItems("*", Qt.MatchWildcard)
+            self.schedule_list.item(i).text()
+            for i in range(self.schedule_list.count())
         ]
         self.config_store.set("schedule_list", schedule_items)
         self.config_store.set(
@@ -214,10 +423,12 @@ class Configuration(QDialog):
         self.config_store.set("interval_hours", self.interval_time_hour.value())
         self.hide()
 
-    def _cancel_action(self):
+    def _cancel_action(self) -> None:
         self.hide()
 
-    def _schedule_radio_action(self):
+    # --- Schedule helpers (unchanged logic) ---
+
+    def _schedule_radio_action(self) -> None:
         for widget in self.schedule_widgets:
             if (
                 widget == self.remove_time_button
@@ -228,24 +439,29 @@ class Configuration(QDialog):
         for widget in self.interval_widgets:
             widget.setEnabled(False)
 
-    def _interval_radio_action(self):
+    def _interval_radio_action(self) -> None:
         for widget in self.interval_widgets:
             widget.setEnabled(True)
         for widget in self.schedule_widgets:
             widget.setEnabled(False)
 
-    def _add_time_action(self):
+    def _add_time_action(self) -> None:
         time_value = "{:02d}:{:02d}".format(
             self.schedule_time_hour.value(), self.schedule_time_minute.value()
         )
-        if len(self.schedule_list.findItems(time_value, Qt.MatchExactly)) == 0:
+        matches = [
+            self.schedule_list.item(i)
+            for i in range(self.schedule_list.count())
+            if self.schedule_list.item(i).text() == time_value
+        ]
+        if not matches:
             self.schedule_list.addItem(time_value)
 
-    def _remove_time_action(self):
+    def _remove_time_action(self) -> None:
         self.schedule_list.takeItem(self.schedule_list.currentRow())
         self.remove_time_button.setEnabled(self.schedule_list.count() > 0)
 
-    def _schedule_item_action(self):
+    def _schedule_item_action(self) -> None:
         self.remove_time_button.setEnabled(self.schedule_list.count() > 0)
 
 
