@@ -48,6 +48,13 @@ class ClickUpClient:
         """Lazily initialise the underlying SDK client (makes a network call)."""
         if self._client is None:
             self._client = ClickupClient.init(user_token=self._user_token)
+            user = self._client.TOKEN_USER
+            LOG.debug(
+                "Authorised as: %s (email=%s, id=%s)",
+                user["username"],
+                user["email"],
+                user["id"],
+            )
         return self._client
 
     def _get_team_id(self) -> str | None:
@@ -55,7 +62,15 @@ class ClickUpClient:
         if self._team_id is not _NOT_FETCHED:
             return self._team_id  # type: ignore[return-value]
         teams = self._get_client().get_teams()
-        self._team_id = teams[0]["id"] if teams else None
+        if teams:
+            LOG.debug("Available workspaces:")
+            for team in teams:
+                LOG.debug("  [%s] %s", team["id"], team["name"])
+            self._team_id = teams[0]["id"]
+            LOG.debug("Using workspace: %s (%s)", teams[0]["name"], teams[0]["id"])
+        else:
+            LOG.debug("No workspaces found for this token.")
+            self._team_id = None
         return self._team_id  # type: ignore[return-value]
 
     def _get_release_type_id(self) -> int | None:
@@ -78,6 +93,12 @@ class ClickUpClient:
             )
             response_data: dict = response or {}  # type: ignore[assignment]
             custom_items = response_data.get("custom_items", [])
+            if custom_items:
+                LOG.debug("Custom task types in workspace:")
+                for item in custom_items:
+                    LOG.debug("  [%s] %s", item.get("id"), item.get("name"))
+            else:
+                LOG.debug("No custom task types found in workspace.")
             for item in custom_items:
                 if item.get("name", "").strip().lower() == "release":
                     self._release_type_id = int(item["id"])
@@ -144,9 +165,13 @@ class ClickUpClient:
                 tasks = cu_list.get_tasks(
                     params={"subtasks": "false", "include_closed": "false"}
                 )
+                LOG.debug("List '%s' (%s): fetched %d task(s)", list_name, list_id, len(tasks))
+                skipped = 0
+                release_expanded = 0
                 for task in tasks:
                     status = task["status"]["status"].lower()
                     if status in TERMINAL_STATUSES:
+                        skipped += 1
                         continue
 
                     task_id = task["id"]
@@ -158,7 +183,9 @@ class ClickUpClient:
                         and custom_item_id == release_type_id
                     ):
                         try:
-                            for subtask in self._fetch_subtasks(task_id):
+                            subtasks = self._fetch_subtasks(task_id)
+                            added = 0
+                            for subtask in subtasks:
                                 sub_status = subtask["status"]["status"].lower()
                                 if sub_status in TERMINAL_STATUSES:
                                     continue
@@ -173,6 +200,14 @@ class ClickUpClient:
                                         "list_name": list_name,
                                     }
                                 )
+                                added += 1
+                            LOG.debug(
+                                "  Release task '%s' (%s): expanded into %d subtask(s)",
+                                task["name"],
+                                task_id,
+                                added,
+                            )
+                            release_expanded += 1
                         except Exception:
                             LOG.exception(
                                 "Failed to fetch subtasks for Release task %s", task_id
@@ -185,6 +220,11 @@ class ClickUpClient:
                     result.append(
                         {"id": task_id, "name": task["name"], "list_name": list_name}
                     )
+                LOG.debug(
+                    "  Skipped %d terminal task(s), expanded %d Release task(s)",
+                    skipped,
+                    release_expanded,
+                )
             except Exception:
                 LOG.exception("Failed to fetch tasks from list %s", list_id)
 
@@ -294,6 +334,12 @@ if __name__ == "__main__":
 
     load_dotenv()
 
+    logging.basicConfig(
+        level=logging.WARNING,
+        format="%(levelname)-8s %(name)s: %(message)s",
+    )
+    LOG.setLevel(logging.DEBUG)
+
     token = os.environ.get("CLICKUP_TOKEN")
     if not token:
         raise SystemExit("CLICKUP_TOKEN environment variable is not set.")
@@ -309,6 +355,6 @@ if __name__ == "__main__":
     client = ClickUpClient(user_token=token)
     issues = client.get_relevant_issues(list_ids)
 
-    print(f"Found {len(issues)} open issue(s):\n")
+    LOG.info("Found %d open issue(s):", len(issues))
     for issue in issues:
-        print(f"  [{issue['id']}] {issue['name']}")
+        LOG.info("  [%s] %s  (%s)", issue["list_name"], issue["name"], issue["id"])
