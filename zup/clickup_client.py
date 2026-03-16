@@ -328,11 +328,7 @@ class ClickUpClient:
 # ----------------------------------------------------------------------
 
 if __name__ == "__main__":
-    import os
-
-    from dotenv import load_dotenv
-
-    load_dotenv()
+    from zup.config_store import ConfigStore
 
     logging.basicConfig(
         level=logging.WARNING,
@@ -340,16 +336,17 @@ if __name__ == "__main__":
     )
     LOG.setLevel(logging.DEBUG)
 
-    token = os.environ.get("CLICKUP_TOKEN")
+    _store = ConfigStore()
+    token = _store.get("clickup_token")
     if not token:
-        raise SystemExit("CLICKUP_TOKEN environment variable is not set.")
+        raise SystemExit(
+            "No ClickUp token configured. Set it via the Zup settings dialog."
+        )
 
-    raw_list_ids = os.environ.get("CLICKUP_LIST_IDS", "")
-    list_ids = [lid.strip() for lid in raw_list_ids.split(",") if lid.strip()]
+    list_ids: list[str] = _store.get("clickup_lists", [])
     if not list_ids:
         raise SystemExit(
-            "CLICKUP_LIST_IDS environment variable is not set "
-            "(comma-separated list of ClickUp list IDs)."
+            "No ClickUp lists configured. Add lists via the Zup settings dialog."
         )
 
     client = ClickUpClient(user_token=token)

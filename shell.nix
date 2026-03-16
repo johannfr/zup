@@ -25,7 +25,8 @@ in
       pkgs.python3Packages.appdirs
       pkgs.python3Packages.pendulum
       pkgs.python3Packages.requests
-      pkgs.python3Packages.python-dotenv
+      pkgs.python3Packages.click
+      pkgs.pyright
       clickup-python-sdk
     ];
 
