@@ -5,11 +5,11 @@ A PySide6 (Qt6) application for registering time spent on ClickUp tasks.
 import logging
 import os
 import sys
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Optional, cast
 
 import pendulum
 from PySide6.QtCore import QEvent, QRunnable, Qt, QThreadPool, QTimer, Slot
-from PySide6.QtGui import QCloseEvent, QIcon
+from PySide6.QtGui import QCloseEvent, QIcon, QKeyEvent
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
@@ -155,9 +155,9 @@ class LogWorkDialog(QDialog):
         self.log_widget = QWidget()
         self.log_layout = QVBoxLayout(self.log_widget)
         for item in reversed(self.config_store.get("registration_history", [])):
-            item_datetime = pendulum.parse(item["datetime"]).format(
-                "YYYY-MM-DD HH:mm:ss"
-            )
+            item_datetime = cast(
+                pendulum.DateTime, pendulum.parse(item["datetime"])
+            ).format("YYYY-MM-DD HH:mm:ss")
             self.log_layout.addWidget(
                 QLabel(
                     f"{item_datetime}: {item['issue_title']}: {item['time_spent']} hours"
@@ -213,7 +213,10 @@ class LogWorkDialog(QDialog):
             self.hide()
             return
         next_run = self.config_store.get("next_run")
-        if len(next_run) == 0 or pendulum.parse(next_run) < pendulum.now():
+        if (
+            len(next_run) == 0
+            or cast(pendulum.DateTime, pendulum.parse(next_run)) < pendulum.now()
+        ):
             LOG.debug("Snoozing due to closeEvent")
             self._snooze(15)
         else:
@@ -221,10 +224,15 @@ class LogWorkDialog(QDialog):
             self.hide()
 
     def eventFilter(self, widget, event: QEvent) -> bool:
-        if event.type() == QEvent.Type.KeyPress and event.key() in (
-            Qt.Key.Key_Enter,
-            Qt.Key.Key_Return,
-            Qt.Key.Key_Escape,
+        if (
+            event.type() == QEvent.Type.KeyPress
+            and isinstance(event, QKeyEvent)
+            and event.key()
+            in (
+                Qt.Key.Key_Enter,
+                Qt.Key.Key_Return,
+                Qt.Key.Key_Escape,
+            )
         ):
             LOG.debug("Ignoring keystroke")
             return True
@@ -241,13 +249,18 @@ class LogWorkDialog(QDialog):
                 next_run = pendulum.tomorrow().add(hours=6)
             elif duration == -2:
                 next_run = pendulum.now().next(pendulum.MONDAY).add(hours=6)
+            else:
+                raise ValueError(f"Unknown snooze duration: {duration}")
 
         self.config_store.set("next_run", next_run.for_json())
         self.hide()
 
     def _schedule_next_run(self) -> None:
         next_run = self.config_store.get("next_run")
-        if len(next_run) == 0 or pendulum.parse(next_run) < pendulum.now():
+        if (
+            len(next_run) == 0
+            or cast(pendulum.DateTime, pendulum.parse(next_run)) < pendulum.now()
+        ):
             LOG.debug("Schedule run in the future")
             if (
                 self.config_store.get("schedule_type", DEFAULT_SCHEDULE_TYPE)
@@ -310,8 +323,6 @@ class LogWorkDialog(QDialog):
         registration_history = registration_history[-5:]
         self.config_store.set("registration_history", registration_history)
         self.config_store.set("last_registration_issue_id", issue_id)
-        self.config_store.set("last_registration_time_spent", decimal_hours)
-        self.config_store.set("last_registration_datetime", str(pendulum.now()))
         self._schedule_next_run()
         self.close()
 
@@ -377,12 +388,9 @@ class SystemTrayIcon(QSystemTrayIcon):
         self._logwork_dialog = LogWorkDialog(self.config_store, self._parent_widget)
 
     def _timer_tick(self) -> None:
-        try:
-            if self._logwork_dialog.isVisible():
-                LOG.debug("Window is already open.")
-                return
-        except AttributeError:
-            pass
+        if self._logwork_dialog is not None and self._logwork_dialog.isVisible():
+            LOG.debug("Window is already open.")
+            return
 
         if not self.config_store.get("clickup_token", ""):
             LOG.debug("No ClickUp token configured. Opening settings.")
@@ -395,9 +403,9 @@ class SystemTrayIcon(QSystemTrayIcon):
             LOG.debug("We have never executed. We should do that right now..")
             self._log_work()
         else:
-            next_run = pendulum.parse(next_run)
-            LOG.debug("Next run at/after: %s", next_run)
-            if next_run <= pendulum.now():
+            next_run_dt = cast(pendulum.DateTime, pendulum.parse(next_run))
+            LOG.debug("Next run at/after: %s", next_run_dt)
+            if next_run_dt <= pendulum.now():
                 LOG.debug("It's time to pop up the registration window")
                 self._log_work()
 

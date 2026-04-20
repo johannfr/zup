@@ -3,7 +3,7 @@ import re
 import sys
 from typing import Optional
 
-from PySide6.QtCore import QObject, QThread, Qt, Signal, Slot
+from PySide6.QtCore import QObject, Qt, QThread, Signal, Slot
 from PySide6.QtWidgets import (
     QApplication,
     QButtonGroup,
@@ -14,7 +14,6 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QListWidget,
-    QListWidgetItem,
     QMessageBox,
     QPushButton,
     QRadioButton,
@@ -26,7 +25,6 @@ from PySide6.QtWidgets import (
 
 from zup.config_store import ConfigStore
 from zup.constants import (
-    DEFAULT_CLICKUP_LISTS,
     DEFAULT_INTERVAL_HOURS,
     DEFAULT_INTERVAL_MINUTES,
     DEFAULT_SCHEDULE_LIST,
@@ -55,6 +53,7 @@ class TimeSpinner(QSpinBox):
 # List picker dialog
 # ---------------------------------------------------------------------------
 
+
 class _TreeLoaderThread(QThread):
     """
     Background thread that fetches the full ClickUp workspace tree.
@@ -64,8 +63,8 @@ class _TreeLoaderThread(QThread):
     the thread is running.
     """
 
-    finished = Signal(list)   # emits the workspace tree on success
-    error = Signal(str)       # emits an error message on failure
+    finished = Signal(list)  # emits the workspace tree on success
+    error = Signal(str)  # emits an error message on failure
 
     def __init__(self, user_token: str, parent: Optional[QObject] = None) -> None:
         super().__init__(parent)
@@ -74,6 +73,7 @@ class _TreeLoaderThread(QThread):
     def run(self) -> None:
         try:
             from zup.clickup_client import ClickUpClient
+
             client = ClickUpClient(user_token=self._user_token)
             tree = client.get_workspace_tree()
             self.finished.emit(tree)
@@ -94,7 +94,7 @@ class ListPickerDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle(self.tr("Add ClickUp Lists"))
         self.setMinimumSize(420, 480)
-        self._selected: list[dict] = []   # [{"id": str, "name": str}]
+        self._selected: list[dict] = []  # [{"id": str, "name": str}]
 
         # Loading label (visible while fetching)
         self._loading_label = QLabel(self.tr("Loading lists from ClickUp..."))
@@ -111,8 +111,7 @@ class ListPickerDialog(QDialog):
         self._error_label.setWordWrap(True)
 
         button_box = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Ok
-            | QDialogButtonBox.StandardButton.Cancel
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
         )
         button_box.accepted.connect(self._accept_action)
         button_box.rejected.connect(self.reject)
@@ -144,9 +143,7 @@ class ListPickerDialog(QDialog):
     @Slot(str)
     def _on_tree_error(self, message: str) -> None:
         self._loading_label.setVisible(False)
-        self._error_label.setText(
-            self.tr("Failed to load lists: ") + message
-        )
+        self._error_label.setText(self.tr("Failed to load lists: ") + message)
         self._error_label.setVisible(True)
 
     def _populate_tree(self, tree: list) -> None:
@@ -198,6 +195,7 @@ class ListPickerDialog(QDialog):
 # Main configuration dialog
 # ---------------------------------------------------------------------------
 
+
 class Configuration(QDialog):
     """
     Application settings dialog.
@@ -218,9 +216,7 @@ class Configuration(QDialog):
         self.setMinimumWidth(460)
 
         # --- ClickUp section ---
-        self.clickup_token = QLineEdit(
-            self.config_store.get("clickup_token", "")
-        )
+        self.clickup_token = QLineEdit(self.config_store.get("clickup_token", ""))
         self.clickup_token.setPlaceholderText(self.tr("ClickUp personal API token"))
         self.clickup_token.setEchoMode(QLineEdit.EchoMode.Password)
 
@@ -366,9 +362,7 @@ class Configuration(QDialog):
             QMessageBox.warning(
                 self,
                 self.tr("No token"),
-                self.tr(
-                    "Please enter a ClickUp API token before adding lists."
-                ),
+                self.tr("Please enter a ClickUp API token before adding lists."),
             )
             return
 
@@ -398,8 +392,7 @@ class Configuration(QDialog):
         self.config_store.set("clickup_token", self.clickup_token.text().strip())
 
         display_entries = [
-            self._lists_widget.item(i).text()
-            for i in range(self._lists_widget.count())
+            self._lists_widget.item(i).text() for i in range(self._lists_widget.count())
         ]
         # Parse IDs out for runtime use; keep display strings for the UI
         list_ids = []
@@ -411,8 +404,7 @@ class Configuration(QDialog):
         self.config_store.set("clickup_lists_display", display_entries)
 
         schedule_items = [
-            self.schedule_list.item(i).text()
-            for i in range(self.schedule_list.count())
+            self.schedule_list.item(i).text() for i in range(self.schedule_list.count())
         ]
         self.config_store.set("schedule_list", schedule_items)
         self.config_store.set(

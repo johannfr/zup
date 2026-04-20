@@ -20,8 +20,9 @@ class ConfigStore:
     A class for managing the application's configuration data.
     """
 
-    _instance = None
+    _instance: "ConfigStore | None" = None
     _lock = QMutex()
+    _config: dict[str, Any]
 
     def __new__(cls):
         if cls._instance is None:
