@@ -4,6 +4,8 @@ A PySide6 (Qt6) application for registering time spent on ClickUp tasks.
 
 import logging
 import os
+import re
+import signal
 import sys
 from typing import Any, Callable, Optional, cast
 
@@ -42,6 +44,36 @@ LOG = logging.getLogger(__name__)
 
 def resolve_icon(filename: str) -> str:
     return os.path.join(os.path.dirname(os.path.abspath(__file__)), "icons", filename)
+
+
+_DURATION_TOKEN = re.compile(r"(\d+(?:\.\d+)?)\s*(h|m|d)", re.IGNORECASE)
+
+
+def _parse_duration(text: str) -> float:
+    """
+    Parse a human-readable duration string into decimal hours.
+
+    Supported units: h (hours), m (minutes), d (day = 8 hours).
+    Multiple tokens are summed: e.g. "1 h 30 m" -> 1.5.
+    Raises ValueError for unrecognised content.
+    """
+    text = text.strip()
+    matches = _DURATION_TOKEN.findall(text)
+    if not matches:
+        raise ValueError(f"no valid tokens found in {text!r}")
+    remainder = _DURATION_TOKEN.sub("", text).strip()
+    if remainder:
+        raise ValueError(f"unrecognised content {remainder!r}")
+    total = 0.0
+    for value, unit in matches:
+        n = float(value)
+        if unit.lower() == "h":
+            total += n
+        elif unit.lower() == "m":
+            total += n / 60
+        elif unit.lower() == "d":
+            total += n * 8
+    return total
 
 
 class Worker(QRunnable):
@@ -106,13 +138,14 @@ class LogWorkDialog(QDialog):
         popup.setWindowFlags(Qt.WindowType.ToolTip)
 
         self.duration_selector = QComboBox()
+        self.duration_selector.setEditable(True)
         duration_values = [
-            [self.tr("4 hours"), 4.0],
-            [self.tr("1 hour"), 1.0],
-            [self.tr("1 day"), 8.0],
+            self.tr("4 h"),
+            self.tr("1 h"),
+            self.tr("8 h"),
         ]
-        for duration in duration_values:
-            self.duration_selector.addItem(*duration)
+        for label in duration_values:
+            self.duration_selector.addItem(label)
         register_button = QPushButton(
             QIcon(resolve_icon("log-work.png")), self.tr("&Register"), self
         )
@@ -302,7 +335,19 @@ class LogWorkDialog(QDialog):
     def _register_action(self) -> None:
         issue_id: str = self.issue_selector.currentData()
         issue_title: str = self.issue_selector.currentText()
-        decimal_hours: float = self.duration_selector.currentData()
+        try:
+            decimal_hours = _parse_duration(self.duration_selector.currentText())
+        except ValueError as e:
+            QMessageBox.warning(
+                self,
+                self.tr("Invalid duration"),
+                self.tr(
+                    f"Could not parse duration: {e}\n\n"
+                    "Use units: h (hours), m (minutes), d (day = 8 h).\n"
+                    'Examples: "1 h", "30 m", "1 h 30 m", "0.5 h"'
+                ),
+            )
+            return
 
         if self.cu_client is not None:
             self.submit_thread_pool.start(
@@ -446,6 +491,10 @@ def main() -> None:
         format="%(levelname)-8s %(funcName)s:%(filename)s:%(lineno)d %(message)s",
     )
     app = QApplication(sys.argv)
+    signal.signal(signal.SIGINT, lambda *_: (LOG.info("Exiting"), app.quit()))
+    sigint_timer = QTimer()
+    sigint_timer.start(500)
+    sigint_timer.timeout.connect(lambda: None)
     _maybe_migrate_tp_config(config_store)
     root_widget = QWidget()
     tray_icon = SystemTrayIcon(QIcon(resolve_icon("zup.png")), root_widget)
