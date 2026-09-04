@@ -125,7 +125,9 @@ class LogWorkDialog(QDialog):
         relevant_issues = []
         for issue in raw_issues:
             list_prefix = f"[{issue['list_name']}] " if issue.get("list_name") else ""
-            issue_display_string = f"{list_prefix}{issue['name']}  ({issue['id']})"
+            issue_display_string = (
+                f"{list_prefix}{issue['name']}  ({issue['custom_id']})"
+            )
             relevant_issues.append(issue_display_string)
             self.issue_selector.addItem(issue_display_string, issue["id"])
 

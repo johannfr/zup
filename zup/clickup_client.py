@@ -13,6 +13,7 @@ The user token is passed at construction time. The caller (zup.py) is responsibl
 for reading it from ConfigStore. This module has no knowledge of ConfigStore.
 """
 
+import json
 import logging
 
 from clickup_python_sdk.api import ClickupClient
@@ -102,12 +103,16 @@ class ClickUpClient:
             for item in custom_items:
                 if item.get("name", "").strip().lower() == "release":
                     self._release_type_id = int(item["id"])
-                    LOG.debug("Release custom_item_id resolved to %s", self._release_type_id)
+                    LOG.debug(
+                        "Release custom_item_id resolved to %s", self._release_type_id
+                    )
                     return self._release_type_id  # type: ignore[return-value]
             LOG.debug("No 'Release' custom task type found in workspace.")
             self._release_type_id = None
         except Exception:
-            LOG.exception("Failed to fetch custom task types; Release expansion disabled.")
+            LOG.exception(
+                "Failed to fetch custom task types; Release expansion disabled."
+            )
             self._release_type_id = None
 
         return self._release_type_id  # type: ignore[return-value]
@@ -165,7 +170,9 @@ class ClickUpClient:
                 tasks = cu_list.get_tasks(
                     params={"subtasks": "false", "include_closed": "false"}
                 )
-                LOG.debug("List '%s' (%s): fetched %d task(s)", list_name, list_id, len(tasks))
+                LOG.debug(
+                    "List '%s' (%s): fetched %d task(s)", list_name, list_id, len(tasks)
+                )
                 skipped = 0
                 release_expanded = 0
                 for task in tasks:
@@ -196,6 +203,7 @@ class ClickUpClient:
                                 result.append(
                                     {
                                         "id": sub_id,
+                                        "custom_id": subtask["custom_id"],
                                         "name": subtask["name"],
                                         "list_name": list_name,
                                     }
@@ -218,7 +226,12 @@ class ClickUpClient:
                         continue
                     seen_ids.add(task_id)
                     result.append(
-                        {"id": task_id, "name": task["name"], "list_name": list_name}
+                        {
+                            "id": task_id,
+                            "custom_id": task["custom_id"],
+                            "name": task["name"],
+                            "list_name": list_name,
+                        }
                     )
                 LOG.debug(
                     "  Skipped %d terminal task(s), expanded %d Release task(s)",
@@ -230,9 +243,7 @@ class ClickUpClient:
 
         return result
 
-    def submit_time_registration(
-        self, issue_id: str, decimal_hours: float
-    ) -> None:
+    def submit_time_registration(self, issue_id: str, decimal_hours: float) -> None:
         """
         Track time on the given ClickUp task.
 
@@ -287,9 +298,7 @@ class ClickUpClient:
             # Folderless lists directly in the space
             try:
                 for lst in space.get_lists():
-                    space_entry["lists"].append(
-                        {"id": lst["id"], "name": lst["name"]}
-                    )
+                    space_entry["lists"].append({"id": lst["id"], "name": lst["name"]})
             except Exception:
                 LOG.exception(
                     "Failed to fetch folderless lists for space %s", space["id"]
@@ -314,9 +323,7 @@ class ClickUpClient:
                         )
                     space_entry["folders"].append(folder_entry)
             except Exception:
-                LOG.exception(
-                    "Failed to fetch folders for space %s", space["id"]
-                )
+                LOG.exception("Failed to fetch folders for space %s", space["id"])
 
             spaces_result.append(space_entry)
 
